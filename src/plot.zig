@@ -3,12 +3,44 @@ const dht = @import("dht");
 const argon2 = std.crypto.pwhash.argon2;
 const hex = std.fmt.fmtSliceHexLower;
 
+pub fn binarySearch(
+    comptime T: type,
+    key: T,
+    items: []const T,
+    context: anytype,
+    comptime compareFn: fn (context: @TypeOf(context), lhs: T, rhs: T) std.math.Order,
+) usize {
+    var left: usize = 0;
+    var right: usize = items.len;
+
+    while (left < right) {
+        // Avoid overflowing in the midpoint calculation
+        const mid = left + (right - left) / 2;
+        // Compare the key with the midpoint element
+        switch (compareFn(context, key, items[mid])) {
+            .eq => return mid,
+            .gt => left = mid + 1,
+            .lt => right = mid,
+        }
+    }
+
+    return left;
+}
+
 pub const Plant = struct {
-    key: dht.Hash,
-    hash: dht.Hash,
+    seed: dht.Hash,
+    flower: dht.Hash,
 
     pub fn format(plant: *const Plant, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        try writer.print("Plant[{x}] = {x}", .{ hex(&plant.key), hex(&plant.hash) });
+        try writer.print("Plant[{x}] = {x}", .{ hex(&plant.seed), hex(&plant.flower) });
+    }
+
+    pub fn lessThan(_: void, lhs: Plant, rhs: Plant) bool {
+        return std.mem.order(u8, &lhs.flower, &rhs.flower) == .lt;
+    }
+
+    pub fn order(_: void, lhs: Plant, rhs: Plant) std.math.Order {
+        return std.mem.order(u8, &lhs.flower, &rhs.flower);
     }
 };
 
@@ -29,13 +61,27 @@ pub const Plot = struct {
         plot.land.deinit();
     }
 
+    pub fn find(plot: *Plot, flower: dht.Hash) !Plant {
+        if (plot.land.items.len == 0)
+            return error.NoItems;
+        const ref = Plant{
+            .seed = std.mem.zeroes(dht.Hash),
+            .flower = flower,
+        };
+        const idx = binarySearch(Plant, ref, plot.land.items, {}, Plant.order);
+        std.log.info("idx: {}", .{idx});
+        return plot.land.items[idx];
+    }
+
     pub fn seed(plot: *Plot) !void {
         plot.land.clearAndFree();
         try plot.land.ensureTotalCapacity(plot.plot_size);
 
         const salt = [_]u8{0x02} ** 16;
 
-        var buf: [1024 * 1024]u8 = undefined;
+        // var buf = try std.heap.page_allocator.alloc(u8, 1 * 1024 * 1024);
+        // defer std.heap.page_allocator.free(buf);
+        var buf: [1 * 1024 * 1024]u8 = undefined;
         var alloc = std.heap.FixedBufferAllocator.init(&buf);
 
         var idx: usize = 0;
@@ -49,23 +95,17 @@ pub const Plot = struct {
                 &hash,
                 &key,
                 &salt,
-                .{ .t = 1, .m = 128, .p = 1, .secret = null, .ad = null },
+                .{ .t = 1, .m = 512, .p = 1, .secret = null, .ad = null },
                 .argon2d,
             );
 
             try plot.land.append(.{
-                .key = key,
-                .hash = hash,
+                .seed = key,
+                .flower = hash,
             });
         }
 
-        const lessThan = struct {
-            fn lessThan(_: void, lhs: Plant, rhs: Plant) bool {
-                return std.mem.order(u8, &lhs.hash, &rhs.hash) == .lt;
-            }
-        }.lessThan;
-
-        std.sort.sort(Plant, plot.land.items, {}, lessThan);
+        std.sort.sort(Plant, plot.land.items, {}, Plant.lessThan);
     }
 };
 
