@@ -1,10 +1,15 @@
 const std = @import("std");
 const dht = @import("dht");
 const argon2 = std.crypto.pwhash.argon2;
+const hex = std.fmt.fmtSliceHexLower;
 
 pub const Plant = struct {
     key: dht.Hash,
     hash: dht.Hash,
+
+    pub fn format(plant: *const Plant, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.print("Plant[{x}] = {x}", .{ hex(&plant.key), hex(&plant.hash) });
+    }
 };
 
 pub const Plot = struct {
@@ -14,7 +19,7 @@ pub const Plot = struct {
     pub fn init(alloc: std.mem.Allocator, plot_size: usize) !*Plot {
         var plot = try alloc.create(Plot);
         plot.* = .{
-            .land = try std.ArrayList(Plant).init(alloc),
+            .land = std.ArrayList(Plant).init(alloc),
             .plot_size = plot_size,
         };
         return plot;
@@ -26,11 +31,9 @@ pub const Plot = struct {
 
     pub fn seed(plot: *Plot) !void {
         plot.land.clearAndFree();
-        plot.land.ensureTotalCapacity(plot.plot_size);
+        try plot.land.ensureTotalCapacity(plot.plot_size);
 
         const salt = [_]u8{0x02} ** 16;
-        const secret = [_]u8{0x03} ** 8;
-        const ad = [_]u8{0x04} ** 64;
 
         var buf: [1024 * 1024]u8 = undefined;
         var alloc = std.heap.FixedBufferAllocator.init(&buf);
@@ -46,14 +49,14 @@ pub const Plot = struct {
                 &hash,
                 &key,
                 &salt,
-                .{ .t = 1, .m = 128, .p = 1, .secret = &secret, .ad = &ad },
+                .{ .t = 1, .m = 128, .p = 1, .secret = null, .ad = null },
                 .argon2d,
             );
 
-            plant.* = .{
+            try plot.land.append(.{
                 .key = key,
                 .hash = hash,
-            };
+            });
         }
 
         const lessThan = struct {
@@ -67,7 +70,7 @@ pub const Plot = struct {
 };
 
 test "TestPlot" {
-    const N = 1024;
+    const N = 1024 * 1024;
     var plot = Plot.init(std.testing.allocator, N);
     plot.seed();
 

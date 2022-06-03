@@ -1,5 +1,9 @@
 const dht = @import("dht");
 
 pub const Block = struct {
-    hash: dht.Hash,
+    proof: dht.Hash = undefined,
+    hash: dht.Hash = undefined,
+
+    data_hash: dht.Hash = undefined,
+    prev_block: dht.hash = undefined,
 };
