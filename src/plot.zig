@@ -75,7 +75,6 @@ pub const Plot = struct {
         // wrap arround
         if (idx == plot.land.items.len)
             return plot.land.items[0];
-        std.log.info("idx: {}", .{idx});
         return plot.land.items[idx];
     }
 
