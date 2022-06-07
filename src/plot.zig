@@ -54,6 +54,8 @@ pub const Plot = struct {
             .land = std.ArrayList(Plant).init(alloc),
             .plot_size = plot_size,
         };
+        try plot.land.ensureTotalCapacity(plot.plot_size);
+
         return plot;
     }
 
@@ -69,14 +71,15 @@ pub const Plot = struct {
             .flower = flower,
         };
         const idx = binarySearch(Plant, ref, plot.land.items, {}, Plant.order);
+
+        // wrap arround
+        if (idx == plot.land.items.len)
+            return plot.land.items[0];
         std.log.info("idx: {}", .{idx});
         return plot.land.items[idx];
     }
 
     pub fn seed(plot: *Plot) !void {
-        plot.land.clearAndFree();
-        try plot.land.ensureTotalCapacity(plot.plot_size);
-
         const salt = [_]u8{0x02} ** 16;
 
         // var buf = try std.heap.page_allocator.alloc(u8, 1 * 1024 * 1024);
@@ -106,6 +109,35 @@ pub const Plot = struct {
         }
 
         std.sort.sort(Plant, plot.land.items, {}, Plant.lessThan);
+    }
+
+    pub fn mergePlots(alloc: std.mem.Allocator, l: *Plot, r: *Plot) !*Plot {
+        var merged = try Plot.init(alloc, l.plot_size + r.plot_size);
+        var il: usize = 0;
+        var ir: usize = 0;
+
+        while (il < l.plot_size and ir < r.plot_size) {
+            if (Plant.lessThan({}, l.land.items[il], l.land.items[ir])) {
+                try merged.land.append(l.land.items[il]);
+                il += 1;
+            } else {
+                try merged.land.append(r.land.items[ir]);
+                ir += 1;
+            }
+        }
+
+        if (il < l.plot_size) {
+            for (l.land.items[il..l.land.items.len]) |plant| {
+                try merged.land.append(plant);
+            }
+        }
+        if (ir < r.plot_size) {
+            for (r.land.items[ir..r.land.items.len]) |plant| {
+                try merged.land.append(plant);
+            }
+        }
+
+        return merged;
     }
 };
 
