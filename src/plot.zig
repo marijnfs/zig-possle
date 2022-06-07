@@ -110,7 +110,7 @@ pub const Plot = struct {
         std.sort.sort(Plant, plot.land.items, {}, Plant.lessThan);
     }
 
-    pub fn mergePlots(alloc: std.mem.Allocator, l: *Plot, r: *Plot) !*Plot {
+    pub fn merge_plots(alloc: std.mem.Allocator, l: *Plot, r: *Plot) !*Plot {
         var merged = try Plot.init(alloc, l.plot_size + r.plot_size);
         var il: usize = 0;
         var ir: usize = 0;
@@ -137,6 +137,59 @@ pub const Plot = struct {
         }
 
         return merged;
+    }
+};
+
+pub const MergePlotter = struct {
+    alloc: std.mem.Allocator,
+    plot_list: std.ArrayList(*Plot),
+    final_plot_size: usize,
+    plot_size: usize,
+
+    pub fn init(alloc: std.mem.Allocator, final_plot_size: usize, plot_size: usize) !*MergePlotter {
+        var plotter = try alloc.create(MergePlotter);
+        plotter.* = .{
+            .alloc = alloc,
+            .plot_list = std.ArrayList(*Plot).init(alloc),
+            .final_plot_size = final_plot_size,
+            .plot_size = plot_size,
+        };
+
+        return plotter;
+    }
+
+    // Add a plot, and merge into previous plots if fitting
+    pub fn add_plot(plotter: *MergePlotter, plot: *Plot) !void {
+        try plotter.plot_list.append(plot);
+        while (try plotter.merge_last()) {}
+    }
+
+    fn merge_last(plotter: *MergePlotter) !bool {
+        if (plotter.plot_list.items.len < 2) {
+            return false; //nothing to do
+        }
+
+        const last_plot = plotter.plot_list.items[plotter.plot_list.items.len - 1];
+        const prelast_plot = plotter.plot_list.items[plotter.plot_list.items.len - 2];
+
+        // check if we can merge
+        if (last_plot.plot_size != prelast_plot.plot_size)
+            return false;
+
+        const merged = try Plot.merge_plots(plotter.alloc, last_plot, prelast_plot);
+
+        // remove last two plots that are now in merged
+        last_plot.deinit();
+        prelast_plot.deinit();
+        try plotter.plot_list.resize(plotter.plot_list.items.len - 2);
+
+        // add merged plot
+        try plotter.plot_list.append(merged);
+        return true;
+    }
+
+    pub fn check_done(plotter: *MergePlotter) bool {
+        return plotter.plot_list.items.len == 1 and plotter.plot_list.items[0].land.items.len == plotter.final_plot_size;
     }
 };
 
