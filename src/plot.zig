@@ -191,6 +191,10 @@ pub const MergePlotter = struct {
     pub fn check_done(plotter: *MergePlotter) bool {
         return plotter.plot_list.items.len == 1 and plotter.plot_list.items[0].land.items.len == plotter.final_plot_size;
     }
+
+    pub fn get_plot(plotter: *MergePlotter) *Plot {
+        return plotter.plot_list.items[0];
+    }
 };
 
 test "TestPlot" {
