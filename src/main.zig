@@ -9,7 +9,7 @@ pub fn main() anyerror!void {
         .hash = std.mem.zeroes(dht.Hash),
     };
 
-    const N = 512 * 1024 * 1024 / 64;
+    const N = 64 * 1024 * 1024 / 64;
     // const N = 1024 / 64;
 
     std.log.info("A block {}", .{block});
@@ -54,7 +54,9 @@ pub fn main() anyerror!void {
     var flower: dht.Hash = undefined;
 
     dht.rng.random().bytes(&flower);
+    try merged_plot.check_integrity();
     std.log.info("{}", .{index.hex(&flower)});
     std.log.info("{}", .{merged_plot.find(flower)});
     std.log.info("{}", .{merged_plot.plot_size});
+    // std.log.info("{}", .{merged_plot});
 }

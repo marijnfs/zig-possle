@@ -116,7 +116,7 @@ pub const Plot = struct {
         var ir: usize = 0;
 
         while (il < l.plot_size and ir < r.plot_size) {
-            if (Plant.lessThan({}, l.land.items[il], l.land.items[ir])) {
+            if (Plant.lessThan({}, l.land.items[il], r.land.items[ir])) {
                 try merged.land.append(l.land.items[il]);
                 il += 1;
             } else {
@@ -126,17 +126,34 @@ pub const Plot = struct {
         }
 
         if (il < l.plot_size) {
-            for (l.land.items[il..l.land.items.len]) |plant| {
+            for (l.land.items[il..l.plot_size]) |plant| {
                 try merged.land.append(plant);
             }
         }
         if (ir < r.plot_size) {
-            for (r.land.items[ir..r.land.items.len]) |plant| {
+            for (r.land.items[ir..r.plot_size]) |plant| {
                 try merged.land.append(plant);
             }
         }
 
         return merged;
+    }
+
+    pub fn check_integrity(plot: *Plot) !void {
+        var i: usize = 0;
+        while (i + 1 < plot.land.items.len) : (i += 1) {
+            if (!Plant.lessThan({}, plot.land.items[i], plot.land.items[i + 1])) {
+                std.log.info("failed {}", .{i});
+                return error.IntegrityFailed;
+            }
+        }
+    }
+
+    pub fn format(plot: *const Plot, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.print("Plot size: {}", .{plot.plot_size});
+        for (plot.land.items) |plant| {
+            try writer.print("{}\n", .{plant});
+        }
     }
 };
 
