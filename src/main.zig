@@ -34,7 +34,7 @@ pub fn main() anyerror!void {
 
     var runners = std.ArrayList(std.Thread).init(std.heap.page_allocator);
     var i: usize = 0;
-    while (i < 16) : (i += 1) {
+    while (i < 10) : (i += 1) {
         try runners.append(try std.Thread.spawn(.{}, run, .{&queue}));
     }
 

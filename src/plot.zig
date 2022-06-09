@@ -79,7 +79,7 @@ pub const Plot = struct {
     }
 
     pub fn seed(plot: *Plot) !void {
-        const salt = [_]u8{0x02} ** 16;
+        const salt = [_]u8{0x02} ** 32;
 
         // var buf = try std.heap.page_allocator.alloc(u8, 1 * 1024 * 1024);
         // defer std.heap.page_allocator.free(buf);
@@ -97,7 +97,7 @@ pub const Plot = struct {
                 &hash,
                 &key,
                 &salt,
-                .{ .t = 1, .m = 512, .p = 1, .secret = null, .ad = null },
+                .{ .t = 2, .m = 512, .p = 1, .secret = null, .ad = null },
                 .argon2d,
             );
 
