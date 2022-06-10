@@ -86,11 +86,14 @@ pub const Plot = struct {
         var buf: [1 * 1024 * 1024]u8 = undefined;
         var alloc = std.heap.FixedBufferAllocator.init(&buf);
 
+        var rng = std.rand.DefaultPrng.init(dht.rng.random().int(u64));
+
         var idx: usize = 0;
         while (idx < plot.plot_size) : (idx += 1) {
             var key: dht.Hash = undefined;
             var hash: dht.Hash = undefined;
-            dht.rng.random().bytes(&key);
+
+            rng.random().bytes(&key);
 
             try argon2.kdf(
                 alloc.allocator(),
@@ -142,6 +145,9 @@ pub const Plot = struct {
     pub fn check_integrity(plot: *Plot) !void {
         var i: usize = 0;
         while (i + 1 < plot.land.items.len) : (i += 1) {
+            // This also dis-allows two consequtive equal items.
+            // Technically this is not needed, but it is a sign of something else going wrong
+            // We would like each plant to be unique
             if (!Plant.lessThan({}, plot.land.items[i], plot.land.items[i + 1])) {
                 std.log.info("failed {}", .{i});
                 return error.IntegrityFailed;
