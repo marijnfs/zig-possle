@@ -17,6 +17,7 @@ pub fn build(b: *std.build.Builder) void {
     exe.install();
 
     exe.addPackagePath("dht", "ext/zig-dht/src/index.zig");
+    exe.addPackagePath("args", "ext/zig-args/args.zig");
 
     const run_cmd = exe.run();
     run_cmd.step.dependOn(b.getInstallStep());

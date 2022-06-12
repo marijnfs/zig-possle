@@ -1,20 +1,41 @@
+pub const io_mode = .evented; // use event loop
+
 const std = @import("std");
 const dht = @import("dht");
+const args = @import("args");
 
 const index = @import("index.zig");
 pub const log_level: std.log.Level = .info;
 
 pub fn main() anyerror!void {
+    try dht.init();
+
+    const options = try args.parseForCurrentProcess(struct {
+        ip: ?[]const u8 = null,
+        port: ?u16 = null,
+    }, std.heap.page_allocator, .print);
+    std.log.info("{s}", .{options.options.ip});
+
+    if (options.options.ip == null or options.options.port == null) {
+        std.log.warn("Ip not defined", .{});
+        return;
+    }
+
     const block = index.block.Block{
         .hash = std.mem.zeroes(dht.Hash),
     };
+
+    const server_id = dht.id.rand_id();
+    std.log.info("Server id: {}", .{index.hex(&server_id)});
+    const address = try std.net.Address.parseIp(options.options.ip.?, options.options.port.?);
+
+    const server = try dht.UDPServer.init(address, server_id);
+    try server.start();
 
     const N = 64 * 1024 * 1024 / 64;
     // const N = 1024 / 64;
 
     std.log.info("A block {}", .{block});
-
-    // var find_hash: dht.Hash = undefined;
 
     var queue = dht.AtomicQueue(*index.plot.Plot).init(std.heap.page_allocator);
 
@@ -34,7 +55,7 @@ pub fn main() anyerror!void {
 
     var runners = std.ArrayList(std.Thread).init(std.heap.page_allocator);
     var i: usize = 0;
-    while (i < 10) : (i += 1) {
+    while (i < 16) : (i += 1) {
         try runners.append(try std.Thread.spawn(.{}, run, .{&queue}));
     }
 
@@ -58,5 +79,7 @@ pub fn main() anyerror!void {
     std.log.info("{}", .{index.hex(&flower)});
     std.log.info("{}", .{merged_plot.find(flower)});
     std.log.info("{}", .{merged_plot.plot_size});
+
+    try server.wait();
     // std.log.info("{}", .{merged_plot});
 }
