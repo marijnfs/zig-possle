@@ -100,7 +100,8 @@ pub const Plot = struct {
                 &hash,
                 &key,
                 &salt,
-                .{ .t = 2, .m = 512, .p = 1, .secret = null, .ad = null },
+                .{ .t = 1, .m = 128, .p = 1, .secret = null, .ad = null }, // 60 days on ryzen 5950x?
+                // .{ .t = 2, .m = 512, .p = 1, .secret = null, .ad = null }, // 600 days on ryzen 5950x
                 .argon2d,
             );
 
@@ -200,11 +201,15 @@ pub const PersistentPlot = struct {
         };
 
         const header_buffer = try dht.serial.serialise(Header{ .size = plot.size });
-        _ = try plot.file.write(header_buffer);
+        var buffered_writer = std.io.bufferedWriter(plot.file.writer());
+
+        _ = try buffered_writer.write(header_buffer);
         for (source_plot.land.items) |plant| {
             const plant_buf = try dht.serial.serialise(plant);
-            _ = try plot.file.write(plant_buf);
+            _ = try buffered_writer.write(plant_buf);
         }
+
+        try buffered_writer.flush();
         return plot;
     }
 
@@ -220,8 +225,13 @@ pub const PersistentPlot = struct {
             .path = path,
         };
 
-        const header_buffer = try dht.serial.serialise(Header{ .size = plot.size });
-        _ = try plot.file.write(header_buffer);
+        var buffer = std.ArrayList(u8).init(std.heap.page_allocator);
+
+        var buffered_writer = std.io.bufferedWriter(plot.file.writer());
+
+        try dht.serial.serialise_to_buffer(Header{ .size = plot.size }, &buffer);
+        _ = try buffered_writer.write(buffer.items);
+        buffer.clearRetainingCapacity();
 
         try source_plot_a.reset_head();
         try source_plot_b.reset_head();
@@ -238,14 +248,16 @@ pub const PersistentPlot = struct {
 
         while (true) {
             if (Plant.lessThan({}, plant_a, plant_b)) {
-                const plant_buf = try dht.serial.serialise(plant_a);
-                _ = try plot.file.write(plant_buf);
+                try dht.serial.serialise_to_buffer(plant_a, &buffer);
+                _ = try buffered_writer.write(buffer.items);
+                buffer.clearRetainingCapacity();
                 if (try source_plot_a.at_end())
                     break;
                 plant_a = try source_plot_a.read_next_plant();
             } else {
-                const plant_buf = try dht.serial.serialise(plant_b);
-                _ = try plot.file.write(plant_buf);
+                try dht.serial.serialise_to_buffer(plant_b, &buffer);
+                _ = try buffered_writer.write(buffer.items);
+                buffer.clearRetainingCapacity();
                 if (try source_plot_b.at_end())
                     break;
                 plant_b = try source_plot_b.read_next_plant();
@@ -255,16 +267,20 @@ pub const PersistentPlot = struct {
         if (try source_plot_a.at_end()) {
             while (!try source_plot_b.at_end()) {
                 const plant = try source_plot_b.read_next_plant();
-                const plant_buf = try dht.serial.serialise(plant);
-                _ = try plot.file.write(plant_buf);
+                try dht.serial.serialise_to_buffer(plant, &buffer);
+                _ = try buffered_writer.write(buffer.items);
+                buffer.clearRetainingCapacity();
             }
         } else {
             while (!try source_plot_a.at_end()) {
                 const plant = try source_plot_a.read_next_plant();
-                const plant_buf = try dht.serial.serialise(plant);
-                _ = try plot.file.write(plant_buf);
+                try dht.serial.serialise_to_buffer(plant, &buffer);
+                _ = try buffered_writer.write(buffer.items);
+                buffer.clearRetainingCapacity();
             }
         }
+
+        try buffered_writer.flush();
         return plot;
     }
 
@@ -303,7 +319,6 @@ pub const PersistentPlot = struct {
     }
 
     pub fn read_plant(plot: *PersistentPlot, idx: usize) !Plant {
-        std.log.info("idx {} {}", .{ idx, @sizeOf(Header) + idx * @sizeOf(Plant) });
         try plot.file.seekTo(@sizeOf(Header) + idx * @sizeOf(Plant));
         return try plot.read_next_plant();
     }

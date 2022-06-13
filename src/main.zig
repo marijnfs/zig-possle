@@ -8,19 +8,6 @@ const index = @import("index.zig");
 pub const log_level: std.log.Level = .info;
 
 pub fn main() anyerror!void {
-    // var f = try std.fs.cwd().openFile("test.txt", .{});
-    var f = try std.fs.cwd().openFile("test.txt", .{ .mode = .read_write });
-    std.log.warn("{}", .{try f.getEndPos()});
-
-    // try f.seekTo(128 * 1024 * 1024);
-    var bla = try std.heap.page_allocator.alloc(u8, 128 * 1024 * 1024);
-    for (bla) |*i| {
-        i.* = ' ';
-    }
-    const written = try f.write(bla);
-    std.log.warn("written {}", .{written});
-
-    f.close();
     try dht.init();
 
     const options = try args.parseForCurrentProcess(struct {
@@ -45,7 +32,7 @@ pub fn main() anyerror!void {
     const server = try dht.UDPServer.init(address, server_id);
     try server.start();
 
-    const N = 1 * 1024 * 1024 / 64;
+    const N = 16 * 1024 * 1024 / 64;
     // const N = 1024 / 64;
 
     std.log.info("A block {}", .{block});
@@ -56,9 +43,11 @@ pub fn main() anyerror!void {
     const base_N = 1024;
     var merge_plotter = try index.plot.MergePlotter.init(std.heap.page_allocator, N, base_N);
 
+    var counter = std.atomic.Atomic(usize).init(0);
+
     const run = struct {
-        fn run(q: *dht.AtomicQueue(*index.plot.Plot)) !void {
-            while (true) {
+        fn run(q: *dht.AtomicQueue(*index.plot.Plot), c: *std.atomic.Atomic(usize)) !void {
+            while (c.load(.SeqCst) == 0) {
                 var new_plot = try index.plot.Plot.init(std.heap.page_allocator, base_N);
                 try new_plot.seed();
                 try q.push(new_plot);
@@ -69,7 +58,7 @@ pub fn main() anyerror!void {
     var runners = std.ArrayList(std.Thread).init(std.heap.page_allocator);
     var i: usize = 0;
     while (i < 16) : (i += 1) {
-        try runners.append(try std.Thread.spawn(.{}, run, .{&queue}));
+        try runners.append(try std.Thread.spawn(.{}, run, .{ &queue, &counter }));
     }
 
     while (!merge_plotter.check_done()) {
@@ -80,6 +69,7 @@ pub fn main() anyerror!void {
             std.time.sleep(10 * std.time.ns_per_ms);
         }
     }
+    _ = counter.fetchAdd(1, .Monotonic);
 
     std.log.info("{}", .{t2.lap() / std.time.ns_per_ms});
 
@@ -104,7 +94,11 @@ pub fn main() anyerror!void {
     try merged_plot.check_integrity();
     std.log.info("{}", .{index.hex(&flower)});
     std.log.info("merged find: {}", .{merged_plot.find(flower)});
-    std.log.info("persistent find: {}", .{persistent_merged_loaded.find(flower)});
+
+    while (true) {
+        dht.rng.random().bytes(&flower);
+        std.log.info("persistent find: {}", .{persistent_merged_loaded.find(flower)});
+    }
 
     std.log.info("{}", .{merged_plot.size});
 
