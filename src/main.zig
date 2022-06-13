@@ -86,20 +86,25 @@ pub fn main() anyerror!void {
     const merged_plot = merge_plotter.get_plot();
     std.log.info("Making Persistent a", .{});
 
-    const persistent_plot = try index.plot.PersistentPlot.init(std.heap.page_allocator, "plot_a.db", merged_plot);
+    const persistent_plot = try index.plot.PersistentPlot.initPlot(std.heap.page_allocator, "plot_a.db", merged_plot);
     std.log.info("Making Persistent b", .{});
-    const persistent_plot_b = try index.plot.PersistentPlot.init(std.heap.page_allocator, "plot_b.db", merged_plot);
+    const persistent_plot_b = try index.plot.PersistentPlot.initPlot(std.heap.page_allocator, "plot_b.db", merged_plot);
     std.log.info("Making Persistent merged", .{});
 
     const persistent_merged = try index.plot.PersistentPlot.initMerged(std.heap.page_allocator, "merged_plot.db", persistent_plot, persistent_plot_b);
     std.log.info("Merged size: {}", .{persistent_merged.size});
+    persistent_merged.deinit();
+
+    const persistent_merged_loaded = try index.plot.PersistentPlot.init(std.heap.page_allocator, "merged_plot.db");
 
     var flower: dht.Hash = undefined;
 
     dht.rng.random().bytes(&flower);
     try merged_plot.check_integrity();
     std.log.info("{}", .{index.hex(&flower)});
-    std.log.info("{}", .{merged_plot.find(flower)});
+    std.log.info("merged find: {}", .{merged_plot.find(flower)});
+    std.log.info("persistent find: {}", .{persistent_merged_loaded.find(flower)});
+
     std.log.info("{}", .{merged_plot.size});
 
     try server.wait();

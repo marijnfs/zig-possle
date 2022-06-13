@@ -172,7 +172,26 @@ pub const PersistentPlot = struct {
         size: usize,
     };
 
-    pub fn init(alloc: std.mem.Allocator, path: []const u8, source_plot: *Plot) !*PersistentPlot {
+    pub fn deinit(plot: *PersistentPlot) void {
+        plot.file.close();
+    }
+
+    pub fn init(alloc: std.mem.Allocator, path: []const u8) !*PersistentPlot {
+        var plot = try alloc.create(PersistentPlot);
+        plot.* = .{
+            .file = try std.fs.cwd().openFile(path, .{ .mode = .read_write }),
+            .size = 0,
+            .path = path,
+        };
+
+        const header = try plot.read_header();
+        plot.size = header.size;
+        try plot.reset_head();
+
+        return plot;
+    }
+
+    pub fn initPlot(alloc: std.mem.Allocator, path: []const u8, source_plot: *Plot) !*PersistentPlot {
         var plot = try alloc.create(PersistentPlot);
         plot.* = .{
             .file = try std.fs.cwd().openFile(path, .{ .mode = .read_write }),
@@ -214,8 +233,8 @@ pub const PersistentPlot = struct {
             return error.InvalidHeader;
         }
 
-        var plant_a = try source_plot_a.read_plant();
-        var plant_b = try source_plot_b.read_plant();
+        var plant_a = try source_plot_a.read_next_plant();
+        var plant_b = try source_plot_b.read_next_plant();
 
         while (true) {
             if (Plant.lessThan({}, plant_a, plant_b)) {
@@ -223,25 +242,25 @@ pub const PersistentPlot = struct {
                 _ = try plot.file.write(plant_buf);
                 if (try source_plot_a.at_end())
                     break;
-                plant_a = try source_plot_a.read_plant();
+                plant_a = try source_plot_a.read_next_plant();
             } else {
                 const plant_buf = try dht.serial.serialise(plant_b);
                 _ = try plot.file.write(plant_buf);
                 if (try source_plot_b.at_end())
                     break;
-                plant_b = try source_plot_b.read_plant();
+                plant_b = try source_plot_b.read_next_plant();
             }
         }
 
         if (try source_plot_a.at_end()) {
             while (!try source_plot_b.at_end()) {
-                const plant = try source_plot_b.read_plant();
+                const plant = try source_plot_b.read_next_plant();
                 const plant_buf = try dht.serial.serialise(plant);
                 _ = try plot.file.write(plant_buf);
             }
         } else {
             while (!try source_plot_a.at_end()) {
-                const plant = try source_plot_a.read_plant();
+                const plant = try source_plot_a.read_next_plant();
                 const plant_buf = try dht.serial.serialise(plant);
                 _ = try plot.file.write(plant_buf);
             }
@@ -249,15 +268,43 @@ pub const PersistentPlot = struct {
         return plot;
     }
 
+    pub fn find(plot: *PersistentPlot, flower: dht.Hash) !Plant {
+        if (plot.size == 0) {
+            return error.NoPlants;
+        }
+        var l: usize = 0;
+        var r: usize = plot.size - 1;
+        const ref = Plant{
+            .seed = std.mem.zeroes(dht.Hash),
+            .flower = flower,
+        };
+
+        while (l != r) {
+            const m = l + (r - l) / 2;
+            const plant = try plot.read_plant(m);
+            if (Plant.lessThan({}, ref, plant)) {
+                r = m;
+            } else {
+                l = m + 1;
+            }
+        }
+        return try plot.read_plant(l);
+    }
+
     pub fn reset_head(plot: *PersistentPlot) !void {
         try plot.file.seekTo(0);
     }
 
-    pub fn read_plant(plot: *PersistentPlot) !Plant {
+    pub fn read_next_plant(plot: *PersistentPlot) !Plant {
         var buf: [@sizeOf(Plant)]u8 = undefined;
         var buf_ptr: []u8 = &buf;
         _ = try plot.file.read(&buf);
         return try dht.serial.deserialise(Plant, &buf_ptr);
+    }
+
+    pub fn read_plant(plot: *PersistentPlot, idx: usize) !Plant {
+        try plot.file.seekTo(@sizeOf(Header) + idx * @sizeOf(Plant));
+        return try plot.read_next_plant();
     }
 
     pub fn read_header(plot: *PersistentPlot) !Header {
