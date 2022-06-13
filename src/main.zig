@@ -8,6 +8,19 @@ const index = @import("index.zig");
 pub const log_level: std.log.Level = .info;
 
 pub fn main() anyerror!void {
+    // var f = try std.fs.cwd().openFile("test.txt", .{});
+    var f = try std.fs.cwd().openFile("test.txt", .{ .mode = .read_write });
+    std.log.warn("{}", .{try f.getEndPos()});
+
+    // try f.seekTo(128 * 1024 * 1024);
+    var bla = try std.heap.page_allocator.alloc(u8, 128 * 1024 * 1024);
+    for (bla) |*i| {
+        i.* = ' ';
+    }
+    const written = try f.write(bla);
+    std.log.warn("written {}", .{written});
+
+    f.close();
     try dht.init();
 
     const options = try args.parseForCurrentProcess(struct {
@@ -32,7 +45,7 @@ pub fn main() anyerror!void {
     const server = try dht.UDPServer.init(address, server_id);
     try server.start();
 
-    const N = 64 * 1024 * 1024 / 64;
+    const N = 1 * 1024 * 1024 / 64;
     // const N = 1024 / 64;
 
     std.log.info("A block {}", .{block});
@@ -71,6 +84,15 @@ pub fn main() anyerror!void {
     std.log.info("{}", .{t2.lap() / std.time.ns_per_ms});
 
     const merged_plot = merge_plotter.get_plot();
+    std.log.info("Making Persistent a", .{});
+
+    const persistent_plot = try index.plot.PersistentPlot.init(std.heap.page_allocator, "plot_a.db", merged_plot);
+    std.log.info("Making Persistent b", .{});
+    const persistent_plot_b = try index.plot.PersistentPlot.init(std.heap.page_allocator, "plot_b.db", merged_plot);
+    std.log.info("Making Persistent merged", .{});
+
+    const persistent_merged = try index.plot.PersistentPlot.initMerged(std.heap.page_allocator, "merged_plot.db", persistent_plot, persistent_plot_b);
+    std.log.info("Merged size: {}", .{persistent_merged.size});
 
     var flower: dht.Hash = undefined;
 
@@ -78,7 +100,7 @@ pub fn main() anyerror!void {
     try merged_plot.check_integrity();
     std.log.info("{}", .{index.hex(&flower)});
     std.log.info("{}", .{merged_plot.find(flower)});
-    std.log.info("{}", .{merged_plot.plot_size});
+    std.log.info("{}", .{merged_plot.size});
 
     try server.wait();
     // std.log.info("{}", .{merged_plot});

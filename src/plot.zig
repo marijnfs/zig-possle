@@ -46,15 +46,15 @@ pub const Plant = struct {
 
 pub const Plot = struct {
     land: std.ArrayList(Plant),
-    plot_size: usize = 0,
+    size: usize = 0,
 
-    pub fn init(alloc: std.mem.Allocator, plot_size: usize) !*Plot {
+    pub fn init(alloc: std.mem.Allocator, size: usize) !*Plot {
         var plot = try alloc.create(Plot);
         plot.* = .{
             .land = std.ArrayList(Plant).init(alloc),
-            .plot_size = plot_size,
+            .size = size,
         };
-        try plot.land.ensureTotalCapacity(plot.plot_size);
+        try plot.land.ensureTotalCapacity(plot.size);
 
         return plot;
     }
@@ -89,7 +89,7 @@ pub const Plot = struct {
         var rng = std.rand.DefaultPrng.init(dht.rng.random().int(u64));
 
         var idx: usize = 0;
-        while (idx < plot.plot_size) : (idx += 1) {
+        while (idx < plot.size) : (idx += 1) {
             var key: dht.Hash = undefined;
             var hash: dht.Hash = undefined;
 
@@ -114,11 +114,11 @@ pub const Plot = struct {
     }
 
     pub fn merge_plots(alloc: std.mem.Allocator, l: *Plot, r: *Plot) !*Plot {
-        var merged = try Plot.init(alloc, l.plot_size + r.plot_size);
+        var merged = try Plot.init(alloc, l.size + r.size);
         var il: usize = 0;
         var ir: usize = 0;
 
-        while (il < l.plot_size and ir < r.plot_size) {
+        while (il < l.size and ir < r.size) {
             if (Plant.lessThan({}, l.land.items[il], r.land.items[ir])) {
                 try merged.land.append(l.land.items[il]);
                 il += 1;
@@ -128,13 +128,13 @@ pub const Plot = struct {
             }
         }
 
-        if (il < l.plot_size) {
-            for (l.land.items[il..l.plot_size]) |plant| {
+        if (il < l.size) {
+            for (l.land.items[il..l.size]) |plant| {
                 try merged.land.append(plant);
             }
         }
-        if (ir < r.plot_size) {
-            for (r.land.items[ir..r.plot_size]) |plant| {
+        if (ir < r.size) {
+            for (r.land.items[ir..r.size]) |plant| {
                 try merged.land.append(plant);
             }
         }
@@ -156,26 +156,135 @@ pub const Plot = struct {
     }
 
     pub fn format(plot: *const Plot, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        try writer.print("Plot size: {}", .{plot.plot_size});
+        try writer.print("Plot size: {}", .{plot.size});
         for (plot.land.items) |plant| {
             try writer.print("{}\n", .{plant});
         }
     }
 };
 
+pub const PersistentPlot = struct {
+    file: std.fs.File,
+    size: usize = 0,
+    path: []const u8 = "", //Opening path
+
+    const Header = struct {
+        size: usize,
+    };
+
+    pub fn init(alloc: std.mem.Allocator, path: []const u8, source_plot: *Plot) !*PersistentPlot {
+        var plot = try alloc.create(PersistentPlot);
+        plot.* = .{
+            .file = try std.fs.cwd().openFile(path, .{ .mode = .read_write }),
+            .size = source_plot.size,
+            .path = path,
+        };
+
+        const header_buffer = try dht.serial.serialise(Header{ .size = plot.size });
+        _ = try plot.file.write(header_buffer);
+        for (source_plot.land.items) |plant| {
+            const plant_buf = try dht.serial.serialise(plant);
+            _ = try plot.file.write(plant_buf);
+        }
+        return plot;
+    }
+
+    pub fn initMerged(alloc: std.mem.Allocator, path: []const u8, source_plot_a: *PersistentPlot, source_plot_b: *PersistentPlot) !*PersistentPlot {
+        if (source_plot_a.size == 0 or source_plot_b.size == 0) {
+            return error.NoItems;
+        }
+
+        var plot = try alloc.create(PersistentPlot);
+        plot.* = .{
+            .file = try std.fs.cwd().openFile(path, .{ .mode = .read_write }),
+            .size = source_plot_a.size + source_plot_b.size,
+            .path = path,
+        };
+
+        const header_buffer = try dht.serial.serialise(Header{ .size = plot.size });
+        _ = try plot.file.write(header_buffer);
+
+        try source_plot_a.reset_head();
+        try source_plot_b.reset_head();
+
+        const header_a = try source_plot_a.read_header();
+        const header_b = try source_plot_b.read_header();
+
+        if (header_a.size != source_plot_a.size or header_b.size != source_plot_b.size) {
+            return error.InvalidHeader;
+        }
+
+        var plant_a = try source_plot_a.read_plant();
+        var plant_b = try source_plot_b.read_plant();
+
+        while (true) {
+            if (Plant.lessThan({}, plant_a, plant_b)) {
+                const plant_buf = try dht.serial.serialise(plant_a);
+                _ = try plot.file.write(plant_buf);
+                if (try source_plot_a.at_end())
+                    break;
+                plant_a = try source_plot_a.read_plant();
+            } else {
+                const plant_buf = try dht.serial.serialise(plant_b);
+                _ = try plot.file.write(plant_buf);
+                if (try source_plot_b.at_end())
+                    break;
+                plant_b = try source_plot_b.read_plant();
+            }
+        }
+
+        if (try source_plot_a.at_end()) {
+            while (!try source_plot_b.at_end()) {
+                const plant = try source_plot_b.read_plant();
+                const plant_buf = try dht.serial.serialise(plant);
+                _ = try plot.file.write(plant_buf);
+            }
+        } else {
+            while (!try source_plot_a.at_end()) {
+                const plant = try source_plot_a.read_plant();
+                const plant_buf = try dht.serial.serialise(plant);
+                _ = try plot.file.write(plant_buf);
+            }
+        }
+        return plot;
+    }
+
+    pub fn reset_head(plot: *PersistentPlot) !void {
+        try plot.file.seekTo(0);
+    }
+
+    pub fn read_plant(plot: *PersistentPlot) !Plant {
+        var buf: [@sizeOf(Plant)]u8 = undefined;
+        var buf_ptr: []u8 = &buf;
+        _ = try plot.file.read(&buf);
+        return try dht.serial.deserialise(Plant, &buf_ptr);
+    }
+
+    pub fn read_header(plot: *PersistentPlot) !Header {
+        var buf: [@sizeOf(Header)]u8 = undefined;
+        var buf_ptr: []u8 = &buf;
+        _ = try plot.file.read(&buf);
+        return try dht.serial.deserialise(Header, &buf_ptr);
+    }
+
+    pub fn at_end(plot: *PersistentPlot) !bool {
+        return (try plot.file.getPos()) == (try plot.file.getEndPos());
+    }
+};
+
 pub const MergePlotter = struct {
     alloc: std.mem.Allocator,
     plot_list: std.ArrayList(*Plot),
-    final_plot_size: usize,
-    plot_size: usize,
+    final_size: usize,
+    block_size: usize,
 
-    pub fn init(alloc: std.mem.Allocator, final_plot_size: usize, plot_size: usize) !*MergePlotter {
+    pub fn init(alloc: std.mem.Allocator, final_size: usize, block_size: usize) !*MergePlotter {
         var plotter = try alloc.create(MergePlotter);
         plotter.* = .{
             .alloc = alloc,
             .plot_list = std.ArrayList(*Plot).init(alloc),
-            .final_plot_size = final_plot_size,
-            .plot_size = plot_size,
+            .final_size = final_size,
+            .block_size = block_size,
         };
 
         return plotter;
@@ -196,7 +305,7 @@ pub const MergePlotter = struct {
         const prelast_plot = plotter.plot_list.items[plotter.plot_list.items.len - 2];
 
         // check if we can merge
-        if (last_plot.plot_size != prelast_plot.plot_size)
+        if (last_plot.size != prelast_plot.size)
             return false;
 
         const merged = try Plot.merge_plots(plotter.alloc, last_plot, prelast_plot);
@@ -212,7 +321,7 @@ pub const MergePlotter = struct {
     }
 
     pub fn check_done(plotter: *MergePlotter) bool {
-        return plotter.plot_list.items.len == 1 and plotter.plot_list.items[0].land.items.len == plotter.final_plot_size;
+        return plotter.plot_list.items.len == 1 and plotter.plot_list.items[0].land.items.len == plotter.final_size;
     }
 
     pub fn get_plot(plotter: *MergePlotter) *Plot {
