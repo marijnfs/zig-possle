@@ -93,10 +93,11 @@ pub fn main() anyerror!void {
 
     const persistent_merged = try index.plot.PersistentPlot.initMerged(std.heap.page_allocator, "merged_plot.db", persistent_plot, persistent_plot_b);
     std.log.info("Merged size: {}", .{persistent_merged.size});
+    try persistent_merged.check_consistency();
     persistent_merged.deinit();
 
     const persistent_merged_loaded = try index.plot.PersistentPlot.init(std.heap.page_allocator, "merged_plot.db");
-
+    try persistent_merged_loaded.check_consistency();
     var flower: dht.Hash = undefined;
 
     dht.rng.random().bytes(&flower);

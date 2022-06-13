@@ -303,6 +303,7 @@ pub const PersistentPlot = struct {
     }
 
     pub fn read_plant(plot: *PersistentPlot, idx: usize) !Plant {
+        std.log.info("idx {} {}", .{ idx, @sizeOf(Header) + idx * @sizeOf(Plant) });
         try plot.file.seekTo(@sizeOf(Header) + idx * @sizeOf(Plant));
         return try plot.read_next_plant();
     }
@@ -316,6 +317,19 @@ pub const PersistentPlot = struct {
 
     pub fn at_end(plot: *PersistentPlot) !bool {
         return (try plot.file.getPos()) == (try plot.file.getEndPos());
+    }
+
+    pub fn check_consistency(plot: *PersistentPlot) !void {
+        var plant_ref = try plot.read_plant(0);
+        var i: usize = 1;
+        while (i < plot.size) : (i += 1) {
+            const plant_next = try plot.read_next_plant();
+            if (Plant.lessThan({}, plant_next, plant_ref)) {
+                std.log.warn("{} {} {} {}", .{ i, plot.size, plant_ref, plant_next });
+                return error.InconsistentPersistentPlot;
+            }
+            plant_ref = plant_next;
+        }
     }
 };
 
