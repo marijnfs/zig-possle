@@ -1,0 +1,6 @@
+[submodule "ext/zig-args"]
+	path = ext/zig-args
+	url = https://github.com/MasterQ32/zig-args.git
+[submodule "ext/zig-dht"]
+	path = ext/zig-dht
+	url = gitolite@vps9114.xlshosting.net:zig-dht
