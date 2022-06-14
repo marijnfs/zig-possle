@@ -180,7 +180,7 @@ pub const PersistentPlot = struct {
     pub fn init(alloc: std.mem.Allocator, path: []const u8) !*PersistentPlot {
         var plot = try alloc.create(PersistentPlot);
         plot.* = .{
-            .file = try std.fs.cwd().openFile(path, .{ .mode = .read_write }),
+            .file = try std.fs.cwd().openFile(path, .{}),
             .size = 0,
             .path = path,
         };
@@ -195,17 +195,23 @@ pub const PersistentPlot = struct {
     pub fn initPlot(alloc: std.mem.Allocator, path: []const u8, source_plot: *Plot) !*PersistentPlot {
         var plot = try alloc.create(PersistentPlot);
         plot.* = .{
-            .file = try std.fs.cwd().openFile(path, .{ .mode = .read_write }),
+            .file = try std.fs.cwd().createFile(path, .{ .read = true }),
             .size = source_plot.size,
             .path = path,
         };
 
-        const header_buffer = try dht.serial.serialise(Header{ .size = plot.size });
+        var arena_alloc = std.heap.ArenaAllocator.init(alloc);
+        defer arena_alloc.deinit();
+
+        const header_buffer = try dht.serial.serialise_alloc(Header{ .size = plot.size }, arena_alloc.allocator());
+        defer arena_alloc.allocator().free(header_buffer);
+
         var buffered_writer = std.io.bufferedWriter(plot.file.writer());
 
         _ = try buffered_writer.write(header_buffer);
         for (source_plot.land.items) |plant| {
-            const plant_buf = try dht.serial.serialise(plant);
+            const plant_buf = try dht.serial.serialise_alloc(plant, arena_alloc.allocator());
+            defer arena_alloc.allocator().free(plant_buf);
             _ = try buffered_writer.write(plant_buf);
         }
 
@@ -220,18 +226,21 @@ pub const PersistentPlot = struct {
 
         var plot = try alloc.create(PersistentPlot);
         plot.* = .{
-            .file = try std.fs.cwd().openFile(path, .{ .mode = .read_write }),
+            .file = try std.fs.cwd().createFile(path, .{ .read = true }),
             .size = source_plot_a.size + source_plot_b.size,
             .path = path,
         };
 
-        var buffer = std.ArrayList(u8).init(std.heap.page_allocator);
-
         var buffered_writer = std.io.bufferedWriter(plot.file.writer());
 
-        try dht.serial.serialise_to_buffer(Header{ .size = plot.size }, &buffer);
-        _ = try buffered_writer.write(buffer.items);
-        buffer.clearRetainingCapacity();
+        var arena_alloc = std.heap.ArenaAllocator.init(alloc);
+        defer arena_alloc.deinit();
+
+        {
+            const header_buf = try dht.serial.serialise_alloc(Header{ .size = plot.size }, arena_alloc.allocator());
+            defer arena_alloc.allocator().free(header_buf);
+            _ = try buffered_writer.write(header_buf);
+        }
 
         try source_plot_a.reset_head();
         try source_plot_b.reset_head();
@@ -248,16 +257,18 @@ pub const PersistentPlot = struct {
 
         while (true) {
             if (Plant.lessThan({}, plant_a, plant_b)) {
-                try dht.serial.serialise_to_buffer(plant_a, &buffer);
-                _ = try buffered_writer.write(buffer.items);
-                buffer.clearRetainingCapacity();
+                const buffer = try dht.serial.serialise_alloc(plant_a, arena_alloc.allocator());
+                defer arena_alloc.allocator().free(buffer);
+
+                _ = try buffered_writer.write(buffer);
                 if (try source_plot_a.at_end())
                     break;
                 plant_a = try source_plot_a.read_next_plant();
             } else {
-                try dht.serial.serialise_to_buffer(plant_b, &buffer);
-                _ = try buffered_writer.write(buffer.items);
-                buffer.clearRetainingCapacity();
+                const buffer = try dht.serial.serialise_alloc(plant_b, arena_alloc.allocator());
+                defer arena_alloc.allocator().free(buffer);
+
+                _ = try buffered_writer.write(buffer);
                 if (try source_plot_b.at_end())
                     break;
                 plant_b = try source_plot_b.read_next_plant();
@@ -267,16 +278,17 @@ pub const PersistentPlot = struct {
         if (try source_plot_a.at_end()) {
             while (!try source_plot_b.at_end()) {
                 const plant = try source_plot_b.read_next_plant();
-                try dht.serial.serialise_to_buffer(plant, &buffer);
-                _ = try buffered_writer.write(buffer.items);
-                buffer.clearRetainingCapacity();
+                const buffer = try dht.serial.serialise_alloc(plant, arena_alloc.allocator());
+                defer arena_alloc.allocator().free(buffer);
+
+                _ = try buffered_writer.write(buffer);
             }
         } else {
             while (!try source_plot_a.at_end()) {
                 const plant = try source_plot_a.read_next_plant();
-                try dht.serial.serialise_to_buffer(plant, &buffer);
-                _ = try buffered_writer.write(buffer.items);
-                buffer.clearRetainingCapacity();
+                const buffer = try dht.serial.serialise_alloc(plant, arena_alloc.allocator());
+                defer arena_alloc.allocator().free(buffer);
+                _ = try buffered_writer.write(buffer);
             }
         }
 

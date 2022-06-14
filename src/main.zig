@@ -83,24 +83,24 @@ pub fn main() anyerror!void {
 
     const persistent_merged = try index.plot.PersistentPlot.initMerged(std.heap.page_allocator, "merged_plot.db", persistent_plot, persistent_plot_b);
     std.log.info("Merged size: {}", .{persistent_merged.size});
-    try persistent_merged.check_consistency();
+    // try persistent_merged.check_consistency();
     persistent_merged.deinit();
 
     const persistent_merged_loaded = try index.plot.PersistentPlot.init(std.heap.page_allocator, "merged_plot.db");
-    try persistent_merged_loaded.check_consistency();
+    // try persistent_merged_loaded.check_consistency();
     var flower: dht.Hash = undefined;
 
     dht.rng.random().bytes(&flower);
-    try merged_plot.check_integrity();
     std.log.info("{}", .{index.hex(&flower)});
     std.log.info("merged find: {}", .{merged_plot.find(flower)});
+    std.log.info("{}", .{merged_plot.size});
 
+    std.log.info("Start mining", .{});
     while (true) {
         dht.rng.random().bytes(&flower);
-        std.log.info("persistent find: {}", .{persistent_merged_loaded.find(flower)});
+        _ = try persistent_merged_loaded.find(flower);
+        // std.log.info("persistent find: {} {}", .{ index.hex(&flower), persistent_merged_loaded.find(flower) });
     }
-
-    std.log.info("{}", .{merged_plot.size});
 
     try server.wait();
     // std.log.info("{}", .{merged_plot});
