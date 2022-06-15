@@ -7,6 +7,18 @@ const args = @import("args");
 const index = @import("index.zig");
 pub const log_level: std.log.Level = .info;
 
+pub fn test_file() !void {
+    var file = try std.fs.cwd().createFile("test.txt", .{ .read = true });
+    _ = try file.writer().write("asdf");
+    _ = try file.writer().write("fdsa");
+    try file.seekTo(0);
+    var buf: [3]u8 = undefined;
+    _ = try file.reader().readAll(&buf);
+    std.log.info("{s}", .{buf});
+    _ = try file.reader().readAll(&buf);
+    std.log.info("{s}", .{buf});
+}
+
 pub fn main() anyerror!void {
     try dht.init();
 

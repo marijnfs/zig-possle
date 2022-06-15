@@ -236,14 +236,7 @@ pub const PersistentPlot = struct {
         var arena_alloc = std.heap.ArenaAllocator.init(alloc);
         defer arena_alloc.deinit();
 
-        {
-            const header_buf = try dht.serial.serialise_alloc(Header{ .size = plot.size }, arena_alloc.allocator());
-            defer arena_alloc.allocator().free(header_buf);
-            _ = try buffered_writer.write(header_buf);
-        }
-
-        try source_plot_a.reset_head();
-        try source_plot_b.reset_head();
+        try dht.serial.serialise(Header{ .size = plot.size }, buffered_writer.writer());
 
         const header_a = try source_plot_a.read_header();
         const header_b = try source_plot_b.read_header();
@@ -324,10 +317,7 @@ pub const PersistentPlot = struct {
     }
 
     pub fn read_next_plant(plot: *PersistentPlot) !Plant {
-        var buf: [@sizeOf(Plant)]u8 = undefined;
-        var buf_ptr: []u8 = &buf;
-        _ = try plot.file.read(&buf);
-        return try dht.serial.deserialise(Plant, &buf_ptr);
+        return try dht.serial.deserialise(Plant, plot.file.reader(), null);
     }
 
     pub fn read_plant(plot: *PersistentPlot, idx: usize) !Plant {
@@ -336,10 +326,8 @@ pub const PersistentPlot = struct {
     }
 
     pub fn read_header(plot: *PersistentPlot) !Header {
-        var buf: [@sizeOf(Header)]u8 = undefined;
-        var buf_ptr: []u8 = &buf;
-        _ = try plot.file.read(&buf);
-        return try dht.serial.deserialise(Header, &buf_ptr);
+        try plot.file.seekTo(0);
+        return try dht.serial.deserialise(Header, plot.file.reader(), null);
     }
 
     pub fn at_end(plot: *PersistentPlot) !bool {
