@@ -42,9 +42,10 @@ pub fn main() anyerror!void {
     const address = try std.net.Address.parseIp(options.options.ip.?, options.options.port.?);
 
     const server = try dht.UDPServer.init(address, server_id);
-    try server.start();
+    _ = server;
+    // try server.start();
 
-    const N = 16 * 1024 * 1024 / 64;
+    const N = 128 * 1024 * 1024 / 64;
     // const N = 1024 / 64;
 
     std.log.info("A block {}", .{block});
@@ -89,13 +90,15 @@ pub fn main() anyerror!void {
     std.log.info("Making Persistent a", .{});
 
     const persistent_plot = try index.plot.PersistentPlot.initPlot(std.heap.page_allocator, "plot_a.db", merged_plot);
+    try persistent_plot.check_consistency();
     std.log.info("Making Persistent b", .{});
     const persistent_plot_b = try index.plot.PersistentPlot.initPlot(std.heap.page_allocator, "plot_b.db", merged_plot);
     std.log.info("Making Persistent merged", .{});
+    try persistent_plot_b.check_consistency();
 
     const persistent_merged = try index.plot.PersistentPlot.initMerged(std.heap.page_allocator, "merged_plot.db", persistent_plot, persistent_plot_b);
     std.log.info("Merged size: {}", .{persistent_merged.size});
-    // try persistent_merged.check_consistency();
+    try persistent_merged.check_consistency();
     persistent_merged.deinit();
 
     const persistent_merged_loaded = try index.plot.PersistentPlot.init(std.heap.page_allocator, "merged_plot.db");
@@ -110,10 +113,11 @@ pub fn main() anyerror!void {
     std.log.info("Start mining", .{});
     while (true) {
         dht.rng.random().bytes(&flower);
-        _ = try persistent_merged_loaded.find(flower);
-        // std.log.info("persistent find: {} {}", .{ index.hex(&flower), persistent_merged_loaded.find(flower) });
+        const found = try persistent_merged_loaded.find(flower);
+        _ = found;
+        // std.log.info("persistent find: {} {}", .{ index.hex(&flower), index.hex(&found.flower) });
     }
 
-    try server.wait();
+    // try server.wait();
     // std.log.info("{}", .{merged_plot});
 }

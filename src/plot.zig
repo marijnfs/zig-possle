@@ -200,19 +200,12 @@ pub const PersistentPlot = struct {
             .path = path,
         };
 
-        var arena_alloc = std.heap.ArenaAllocator.init(alloc);
-        defer arena_alloc.deinit();
-
-        const header_buffer = try dht.serial.serialise_alloc(Header{ .size = plot.size }, arena_alloc.allocator());
-        defer arena_alloc.allocator().free(header_buffer);
-
         var buffered_writer = std.io.bufferedWriter(plot.file.writer());
 
-        _ = try buffered_writer.write(header_buffer);
+        try dht.serial.serialise(Header{ .size = plot.size }, buffered_writer.writer());
+
         for (source_plot.land.items) |plant| {
-            const plant_buf = try dht.serial.serialise_alloc(plant, arena_alloc.allocator());
-            defer arena_alloc.allocator().free(plant_buf);
-            _ = try buffered_writer.write(plant_buf);
+            try dht.serial.serialise(plant, buffered_writer.writer());
         }
 
         try buffered_writer.flush();
@@ -245,43 +238,46 @@ pub const PersistentPlot = struct {
             return error.InvalidHeader;
         }
 
-        var plant_a = try source_plot_a.read_next_plant();
-        var plant_b = try source_plot_b.read_next_plant();
+        const read_plant = struct {
+            fn read_plant(reader: anytype) !Plant {
+                return try dht.serial.deserialise(Plant, reader, null);
+            }
+        }.read_plant;
+
+        var reader_a = std.io.bufferedReader(source_plot_a.file.reader());
+        var reader_b = std.io.bufferedReader(source_plot_b.file.reader());
+
+        var plant_a = try read_plant(reader_a.reader());
+        var plant_b = try read_plant(reader_b.reader());
+
+        var i_a: usize = 1; //we already read a plant
+        var i_b: usize = 1;
 
         while (true) {
             if (Plant.lessThan({}, plant_a, plant_b)) {
-                const buffer = try dht.serial.serialise_alloc(plant_a, arena_alloc.allocator());
-                defer arena_alloc.allocator().free(buffer);
-
-                _ = try buffered_writer.write(buffer);
-                if (try source_plot_a.at_end())
+                try dht.serial.serialise(plant_a, buffered_writer.writer());
+                if (i_a >= source_plot_a.size)
                     break;
-                plant_a = try source_plot_a.read_next_plant();
+                plant_a = try read_plant(reader_a.reader());
+                i_a += 1;
             } else {
-                const buffer = try dht.serial.serialise_alloc(plant_b, arena_alloc.allocator());
-                defer arena_alloc.allocator().free(buffer);
-
-                _ = try buffered_writer.write(buffer);
-                if (try source_plot_b.at_end())
+                try dht.serial.serialise(plant_b, buffered_writer.writer());
+                if (i_b >= source_plot_b.size)
                     break;
-                plant_b = try source_plot_b.read_next_plant();
+                plant_b = try read_plant(reader_b.reader());
+                i_b += 1;
             }
         }
 
-        if (try source_plot_a.at_end()) {
-            while (!try source_plot_b.at_end()) {
-                const plant = try source_plot_b.read_next_plant();
-                const buffer = try dht.serial.serialise_alloc(plant, arena_alloc.allocator());
-                defer arena_alloc.allocator().free(buffer);
-
-                _ = try buffered_writer.write(buffer);
+        if (i_b < source_plot_b.size) {
+            while (i_b < source_plot_b.size) : (i_b += 1) {
+                const plant = try read_plant(reader_b.reader());
+                try dht.serial.serialise(plant, buffered_writer.writer());
             }
         } else {
-            while (!try source_plot_a.at_end()) {
-                const plant = try source_plot_a.read_next_plant();
-                const buffer = try dht.serial.serialise_alloc(plant, arena_alloc.allocator());
-                defer arena_alloc.allocator().free(buffer);
-                _ = try buffered_writer.write(buffer);
+            while (i_a < source_plot_a.size) : (i_a += 1) {
+                const plant = try read_plant(reader_a.reader());
+                try dht.serial.serialise(plant, buffered_writer.writer());
             }
         }
 
@@ -302,14 +298,14 @@ pub const PersistentPlot = struct {
 
         while (l != r) {
             const m = l + (r - l) / 2;
-            const plant = try plot.read_plant(m);
+            const plant = try plot.get_plant(m);
             if (Plant.lessThan({}, ref, plant)) {
                 r = m;
             } else {
                 l = m + 1;
             }
         }
-        return try plot.read_plant(l);
+        return try plot.get_plant(l);
     }
 
     pub fn reset_head(plot: *PersistentPlot) !void {
@@ -320,7 +316,7 @@ pub const PersistentPlot = struct {
         return try dht.serial.deserialise(Plant, plot.file.reader(), null);
     }
 
-    pub fn read_plant(plot: *PersistentPlot, idx: usize) !Plant {
+    pub fn get_plant(plot: *PersistentPlot, idx: usize) !Plant {
         try plot.file.seekTo(@sizeOf(Header) + idx * @sizeOf(Plant));
         return try plot.read_next_plant();
     }
@@ -335,12 +331,11 @@ pub const PersistentPlot = struct {
     }
 
     pub fn check_consistency(plot: *PersistentPlot) !void {
-        var plant_ref = try plot.read_plant(0);
+        var plant_ref = try plot.get_plant(0);
         var i: usize = 1;
-        while (i < plot.size) : (i += 1) {
+        while (i + 1 < plot.size) : (i += 1) {
             const plant_next = try plot.read_next_plant();
             if (Plant.lessThan({}, plant_next, plant_ref)) {
-                std.log.warn("{} {} {} {}", .{ i, plot.size, plant_ref, plant_next });
                 return error.InconsistentPersistentPlot;
             }
             plant_ref = plant_next;
