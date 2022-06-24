@@ -42,6 +42,14 @@ pub const Plant = struct {
     pub fn order(_: void, lhs: Plant, rhs: Plant) std.math.Order {
         return std.mem.order(u8, &lhs.flower, &rhs.flower);
     }
+
+    pub fn distance(lhs: Plant, rhs: Plant) dht.Hash {
+        var result = lhs.flower;
+        for (result) |r, i| {
+            result[i] = r ^ rhs.flower[i];
+        }
+        return result;
+    }
 };
 
 pub const Plot = struct {
@@ -361,6 +369,44 @@ pub const MergePlotter = struct {
         return plotter;
     }
 
+    pub fn plot_multithread_blocking(plotter: *MergePlotter, n_threads: usize) !*Plot {
+        var counter = std.atomic.Atomic(usize).init(0);
+
+        const run = struct {
+            fn run(q: *dht.AtomicQueue(*Plot), block_size: usize, c: *std.atomic.Atomic(usize)) !void {
+                while (c.load(.SeqCst) == 0) {
+                    var new_plot = try Plot.init(std.heap.page_allocator, block_size);
+                    try new_plot.seed();
+                    try q.push(new_plot);
+                }
+            }
+        }.run;
+
+        var queue = dht.AtomicQueue(*Plot).init(std.heap.page_allocator);
+        defer queue.deinit();
+
+        var runners = std.ArrayList(std.Thread).init(std.heap.page_allocator);
+        defer runners.deinit();
+        var i: usize = 0;
+        while (i < n_threads) : (i += 1) {
+            try runners.append(try std.Thread.spawn(.{}, run, .{ &queue, plotter.block_size, &counter }));
+        }
+
+        while (!plotter.check_done()) {
+            // std.log.info("Plotting {} {}", .{ merge_plotter.plot_list.items.len, queue.size() });
+            if (queue.pop()) |plot| {
+                try plotter.add_plot(plot);
+            } else {
+                std.time.sleep(10 * std.time.ns_per_ms);
+            }
+        }
+        _ = counter.fetchAdd(1, .Monotonic);
+        for (runners.items) |*thread| {
+            thread.join();
+        }
+        return plotter.extract_plot();
+    }
+
     // Add a plot, and merge into previous plots if fitting
     pub fn add_plot(plotter: *MergePlotter, plot: *Plot) !void {
         try plotter.plot_list.append(plot);
@@ -395,8 +441,8 @@ pub const MergePlotter = struct {
         return plotter.plot_list.items.len == 1 and plotter.plot_list.items[0].land.items.len == plotter.final_size;
     }
 
-    pub fn get_plot(plotter: *MergePlotter) *Plot {
-        return plotter.plot_list.items[0];
+    pub fn extract_plot(plotter: *MergePlotter) *Plot {
+        return plotter.plot_list.pop();
     }
 };
 
@@ -406,6 +452,6 @@ test "TestPlot" {
     plot.seed();
 
     for (plot.land.items) |plant| {
-        std.log.warn("{}", .{plant});
+        std.log.debug("{}", .{plant});
     }
 }

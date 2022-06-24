@@ -1,2 +1,2 @@
 all:
-	zig build
+	zig build -Drelease-fast
