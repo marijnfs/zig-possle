@@ -82,7 +82,11 @@ pub fn main() anyerror!void {
     // //try persistent_merged.check_consistency();
     // persistent_merged.deinit();
 
-    const persistent_merged_loaded = try index.plot.PersistentPlot.init(std.heap.page_allocator, "merged_plot.db");
+    const alloc = std.heap.page_allocator;
+    const persistent_merged_loaded = try index.plot.PersistentPlot.init(alloc, "merged_plot.db");
+
+    const mem_bytes = 1024 * 1024; //1mb
+    const indexed_plot = try index.plot.IndexedPersistentPlot.init(alloc, persistent_merged_loaded, mem_bytes);
     // try persistent_merged_loaded.check_consistency();
     var flower: dht.Hash = undefined;
 
@@ -90,6 +94,7 @@ pub fn main() anyerror!void {
     std.log.info("{}", .{hex(&flower)});
     std.log.info("merged find: {}", .{persistent_merged_loaded.find(flower)});
     std.log.info("{}", .{persistent_merged_loaded.size});
+    std.log.info("block size:{} #:{}", .{ indexed_plot.block_size, indexed_plot.index_size });
 
     std.log.info("Start mining", .{});
     var i: usize = 0;
@@ -101,9 +106,11 @@ pub fn main() anyerror!void {
 
     while (true) {
         dht.rng.random().bytes(&flower);
-        const found = try persistent_merged_loaded.find(flower);
+        const search_plant = Plant{ .flower = flower };
 
-        const dist = Plant.distance(found, closest);
+        // const found = try persistent_merged_loaded.find(flower);
+        const found = try indexed_plot.find(flower);
+        const dist = Plant.distance(found, search_plant);
 
         if (std.mem.order(u8, &dist, &closest_dist) == .lt) {
             closest = found;

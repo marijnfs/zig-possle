@@ -28,7 +28,7 @@ pub fn binarySearch(
 }
 
 pub const Plant = struct {
-    seed: dht.Hash,
+    seed: dht.Hash = std.mem.zeroes(dht.Hash),
     flower: dht.Hash,
 
     pub fn format(plant: *const Plant, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
@@ -299,6 +299,12 @@ pub const PersistentPlot = struct {
         }
         var l: usize = 0;
         var r: usize = plot.size - 1;
+        return plot.find_lr(flower, l, r);
+    }
+
+    pub fn find_lr(plot: *PersistentPlot, flower: dht.Hash, l_: usize, r_: usize) !Plant {
+        var l = l_;
+        var r = r_;
         const ref = Plant{
             .seed = std.mem.zeroes(dht.Hash),
             .flower = flower,
@@ -348,6 +354,68 @@ pub const PersistentPlot = struct {
             }
             plant_ref = plant_next;
         }
+    }
+};
+
+// Indexed plot
+// Keeps a memory index evenly spaced
+// So we can first search in memory and only then persistent memory
+// n_blocks * block_size >= size of underlying persistent plot
+pub const IndexedPersistentPlot = struct {
+    persistent: *PersistentPlot,
+    flower_index: std.ArrayList(dht.Hash), //evenly spread out flowers
+    index_size: usize, //number of blocks
+    block_size: usize, //block size per flower
+
+    pub fn init(alloc: std.mem.Allocator, persistent: *PersistentPlot, byte_size: usize) !*IndexedPersistentPlot {
+        if (persistent.size == 0)
+            return error.NoItems;
+        var plot = try alloc.create(IndexedPersistentPlot);
+
+        const index_size = (byte_size + @sizeOf(dht.Hash) - 1) / @sizeOf(dht.Hash);
+        const block_size = (persistent.size - 1) / index_size;
+
+        plot.* = .{
+            .persistent = persistent,
+            .flower_index = std.ArrayList(dht.Hash).init(alloc), //evenly spread out flowers
+            .index_size = index_size, //number of blocks
+            .block_size = block_size, //block size per flower
+        };
+        // std.log.info("{}", .{plot.*});
+
+        try plot.setup_table();
+
+        return plot;
+    }
+
+    pub fn setup_table(plot: *IndexedPersistentPlot) !void {
+        std.log.info("Building table", .{});
+        try plot.flower_index.ensureTotalCapacity(plot.index_size);
+        var i: usize = 0;
+        while (i < plot.index_size) : (i += 1) {
+            const index = (i + 1) * plot.block_size;
+            const plant = try plot.persistent.get_plant(index);
+            try plot.flower_index.append(plant.flower);
+        }
+        std.sort.sort(dht.Hash, plot.flower_index.items, {}, less_hash);
+        std.log.info("Done building table", .{});
+    }
+
+    fn less_hash(_: void, a: dht.Hash, b: dht.Hash) bool {
+        return order_hash({}, a, b) == .lt;
+    }
+
+    fn order_hash(_: void, a: dht.Hash, b: dht.Hash) std.math.Order {
+        return std.mem.order(u8, &a, &b);
+    }
+
+    pub fn find(plot: *IndexedPersistentPlot, flower: dht.Hash) !Plant {
+        const idx = binarySearch(dht.Hash, flower, plot.flower_index.items, {}, order_hash);
+        // std.log.info("bin idx:{} size: {}, n: {}, bsize: {}", .{ idx, plot.persistent.size, plot.index_size, plot.block_size });
+        const l = idx * plot.block_size;
+        const r = std.math.min((idx + 1) * plot.block_size, plot.persistent.size - 1);
+
+        return plot.persistent.find_lr(flower, l, r);
     }
 };
 
