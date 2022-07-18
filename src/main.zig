@@ -38,6 +38,7 @@ pub fn main() anyerror!void {
     // const block = index.block.Block{
     //     .hash = std.mem.zeroes(dht.Hash),
     // };
+    // std.log.info("A block {}", .{block});
 
     // const server_id = dht.id.rand_id();
     // std.log.info("Server id: {}", .{hex(&server_id)});
@@ -46,41 +47,6 @@ pub fn main() anyerror!void {
     // const server = try dht.UDPServer.init(address, server_id);
     // _ = server;
     // // try server.start();
-
-    // const N = 1024 * 1024 * 1024 / 64 * 3 / 2;
-    // // const N = 1024 / 64;
-
-    // std.log.info("A block {}", .{block});
-
-    // var t2 = try std.time.Timer.start();
-    // const base_N = 1024;
-    // var merge_plotter = try index.plot.MergePlotter.init(std.heap.page_allocator, N, base_N);
-
-    // const n_thread = 14;
-    // const persistent_plot = b: {
-    //     const plot_a = try merge_plotter.plot_multithread_blocking(n_thread);
-    //     defer plot_a.deinit();
-    //     std.log.info("Making Persistent a", .{});
-    //     const plot = try index.plot.PersistentPlot.initPlot(std.heap.page_allocator, "plot_a.db", plot_a);
-    //     // try plot.check_consistency();
-    //     break :b plot;
-    // };
-
-    // const persistent_plot_b = b: {
-    //     const plob_b = try merge_plotter.plot_multithread_blocking(n_thread);
-    //     defer plob_b.deinit();
-    //     std.log.info("Making Persistent b", .{});
-    //     const plot = try index.plot.PersistentPlot.initPlot(std.heap.page_allocator, "plob_b.db", plob_b);
-    //     // try plot.check_consistency();
-    //     break :b plot;
-    // };
-
-    // const persistent_merged = try index.plot.PersistentPlot.initMerged(std.heap.page_allocator, "merged_plot.db", persistent_plot, persistent_plot_b);
-    // std.log.info("Merged size: {}", .{persistent_merged.size});
-
-    // std.log.info("two full plots + persisting + persistent merge took: {}s", .{t2.lap() / std.time.ns_per_s});
-    // //try persistent_merged.check_consistency();
-    // persistent_merged.deinit();
 
     const alloc = std.heap.page_allocator;
     const persistent_merged_loaded = try index.plot.PersistentPlot.init(alloc, "merged_plot.db");
@@ -108,8 +74,8 @@ pub fn main() anyerror!void {
         dht.rng.random().bytes(&flower);
         const search_plant = Plant{ .flower = flower };
 
-        // const found = try persistent_merged_loaded.find(flower);
-        const found = try indexed_plot.find(flower);
+        const found = try persistent_merged_loaded.find(flower);
+        // const found = try indexed_plot.find(flower);
         const dist = Plant.distance(found, search_plant);
 
         if (std.mem.order(u8, &dist, &closest_dist) == .lt) {
@@ -117,8 +83,49 @@ pub fn main() anyerror!void {
             closest_dist = dist;
             std.log.info("\r[{}] persistent search: {} find: {} dist:{}", .{ i, hex(&flower), hex(&found.flower), hex(&closest_dist) });
         }
+
+        i += 1;
     }
 
     // try server.wait();
     // std.log.info("{}", .{merged_plot});
+}
+
+pub fn plot_file() !void {
+
+    //// Plotting
+    // const N = 16 * 1024 * 1024 * 1024 / 64;
+    // // const N = 1024 / 64;
+
+    // var t2 = try std.time.Timer.start();
+    // const base_N = 1024 * 1024;
+    // var merge_plotter = try index.plot.MergePlotter.init(std.heap.page_allocator, N, base_N);
+
+    // const n_thread = 14;
+    // const persistent_plot = b: {
+    //     std.log.info("Starting to plot", .{});
+    //     const plot_a = try merge_plotter.plot_multithread_blocking(n_thread);
+    //     defer plot_a.deinit();
+    //     std.log.info("Making Persistent a", .{});
+    //     const plot = try index.plot.PersistentPlot.initPlot(std.heap.page_allocator, "plot_a.db", plot_a);
+    //     // try plot.check_consistency();
+    //     break :b plot;
+    // };
+
+    // const persistent_plot_b = b: {
+    //     std.log.info("Starting to plot", .{});
+    //     const plob_b = try merge_plotter.plot_multithread_blocking(n_thread);
+    //     defer plob_b.deinit();
+    //     std.log.info("Making Persistent b", .{});
+    //     const plot = try index.plot.PersistentPlot.initPlot(std.heap.page_allocator, "plot_b.db", plob_b);
+    //     // try plot.check_consistency();
+    //     break :b plot;
+    // };
+
+    // const persistent_merged = try index.plot.PersistentPlot.initMerged(std.heap.page_allocator, "merged_plot.db", persistent_plot, persistent_plot_b);
+    // std.log.info("Merged size: {}", .{persistent_merged.size});
+
+    // std.log.info("two full plots + persisting + persistent merge took: {}s", .{t2.lap() / std.time.ns_per_s});
+    // //try persistent_merged.check_consistency();
+    // persistent_merged.deinit();
 }
