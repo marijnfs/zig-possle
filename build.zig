@@ -11,27 +11,49 @@ pub fn build(b: *std.build.Builder) void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const mode = b.standardReleaseOptions();
 
-    const exe = b.addExecutable("zig-pos", "src/main.zig");
-    exe.setTarget(target);
-    exe.setBuildMode(mode);
-    exe.install();
+    const dht_pkg = std.build.Pkg{
+        .name = "dht",
+        .source = .{ .path = "ext/zig-dht/src/index.zig" },
+    };
 
-    exe.addPackagePath("dht", "ext/zig-dht/src/index.zig");
-    exe.addPackagePath("args", "ext/zig-args/args.zig");
+    const args_pkg = std.build.Pkg{
+        .name = "args",
+        .source = .{ .path = "ext/zig-args/args.zig" },
+    };
 
-    const run_cmd = exe.run();
-    run_cmd.step.dependOn(b.getInstallStep());
+    const pos_pkg = std.build.Pkg{
+        .name = "pos",
+        .source = .{ .path = "src/index.zig" },
+        .dependencies = &.{dht_pkg},
+    };
+
+    const plotter = b.addExecutable("plotter", "exe/plotter.zig");
+    plotter.setTarget(target);
+    plotter.setBuildMode(mode);
+    plotter.install();
+
+    plotter.addPackage(dht_pkg);
+    plotter.addPackage(args_pkg);
+    plotter.addPackage(pos_pkg);
+
+    const run_cmd_plotter = plotter.run();
+    run_cmd_plotter.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
-        run_cmd.addArgs(args);
+        run_cmd_plotter.addArgs(args);
     }
 
-    const run_step = b.step("run", "Run the app");
-    run_step.dependOn(&run_cmd.step);
+    const miner = b.addExecutable("miner", "exe/miner.zig");
+    miner.setTarget(target);
+    miner.setBuildMode(mode);
+    miner.install();
 
-    const exe_tests = b.addTest("src/main.zig");
-    exe_tests.setTarget(target);
-    exe_tests.setBuildMode(mode);
+    miner.addPackage(dht_pkg);
+    miner.addPackage(args_pkg);
+    miner.addPackage(pos_pkg);
 
-    const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&exe_tests.step);
+    const run_cmd_miner = miner.run();
+    run_cmd_miner.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        run_cmd_miner.addArgs(args);
+    }
 }

@@ -2,6 +2,8 @@ const std = @import("std");
 const dht = @import("dht");
 const argon2 = std.crypto.pwhash.argon2;
 const hex = std.fmt.fmtSliceHexLower;
+const ID = dht.ID;
+const id_ = dht.id;
 
 pub fn binarySearch(
     comptime T: type,
@@ -27,28 +29,58 @@ pub fn binarySearch(
     return left;
 }
 
+pub fn hash_fast(data: []const u8) dht.Hash {
+    var result: dht.Hash = undefined;
+    std.crypto.hash.Blake3.hash(data, result[0..], .{});
+    return result;
+}
+
+pub fn hash_fast_mul(data_list: [][]const u8) dht.Hash {
+    var hasher = std.crypto.hash.Blake3.init(.{});
+    for (data_list) |data| {
+        hasher.update(data);
+    }
+    var result: dht.Hash = undefined;
+    hasher.final(result[0..]);
+    return result;
+}
+
+pub fn hash_slow(key: []const u8) !dht.Hash {
+    var hash: dht.Hash = undefined;
+
+    const salt = [_]u8{0x02} ** 32;
+    var buf: [1 * 1024 * 1024]u8 = undefined;
+    var alloc = std.heap.FixedBufferAllocator.init(&buf);
+
+    try argon2.kdf(
+        alloc.allocator(),
+        &hash,
+        key,
+        &salt,
+        .{ .t = 1, .m = 128, .p = 1, .secret = null, .ad = null }, // 60 days on ryzen 5950x?
+        // .{ .t = 2, .m = 512, .p = 1, .secret = null, .ad = null }, // 600 days on ryzen 5950x
+        .argon2d,
+    );
+    return hash;
+}
 pub const Plant = struct {
     seed: dht.Hash = std.mem.zeroes(dht.Hash),
-    flower: dht.Hash,
+    bud: dht.Hash,
 
     pub fn format(plant: *const Plant, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        try writer.print("Plant[{x}] = {x}", .{ hex(&plant.seed), hex(&plant.flower) });
+        try writer.print("Plant[{x}] = {x}", .{ hex(&plant.seed), hex(&plant.bud) });
     }
 
     pub fn lessThan(_: void, lhs: Plant, rhs: Plant) bool {
-        return std.mem.order(u8, &lhs.flower, &rhs.flower) == .lt;
+        return std.mem.order(u8, &lhs.bud, &rhs.bud) == .lt;
     }
 
     pub fn order(_: void, lhs: Plant, rhs: Plant) std.math.Order {
-        return std.mem.order(u8, &lhs.flower, &rhs.flower);
+        return std.mem.order(u8, &lhs.bud, &rhs.bud);
     }
 
     pub fn distance(lhs: Plant, rhs: Plant) dht.Hash {
-        var result = lhs.flower;
-        for (result) |r, i| {
-            result[i] = r ^ rhs.flower[i];
-        }
-        return result;
+        return id_.xor(lhs.bud, rhs.bud);
     }
 };
 
@@ -71,12 +103,12 @@ pub const Plot = struct {
         plot.land.deinit();
     }
 
-    pub fn find(plot: *Plot, flower: dht.Hash) !Plant {
+    pub fn find(plot: *Plot, bud: dht.Hash) !Plant {
         if (plot.land.items.len == 0)
             return error.NoItems;
         const ref = Plant{
             .seed = std.mem.zeroes(dht.Hash),
-            .flower = flower,
+            .bud = bud,
         };
         const idx = binarySearch(Plant, ref, plot.land.items, {}, Plant.order);
 
@@ -87,35 +119,21 @@ pub const Plot = struct {
     }
 
     pub fn seed(plot: *Plot) !void {
-        const salt = [_]u8{0x02} ** 32;
-
         // var buf = try std.heap.page_allocator.alloc(u8, 1 * 1024 * 1024);
         // defer std.heap.page_allocator.free(buf);
-        var buf: [1 * 1024 * 1024]u8 = undefined;
-        var alloc = std.heap.FixedBufferAllocator.init(&buf);
 
         var rng = std.rand.DefaultPrng.init(dht.rng.random().int(u64));
 
         var idx: usize = 0;
         while (idx < plot.size) : (idx += 1) {
             var key: dht.Hash = undefined;
-            var hash: dht.Hash = undefined;
-
             rng.random().bytes(&key);
 
-            try argon2.kdf(
-                alloc.allocator(),
-                &hash,
-                &key,
-                &salt,
-                .{ .t = 1, .m = 128, .p = 1, .secret = null, .ad = null }, // 60 days on ryzen 5950x?
-                // .{ .t = 2, .m = 512, .p = 1, .secret = null, .ad = null }, // 600 days on ryzen 5950x
-                .argon2d,
-            );
+            const hash = try hash_slow(&key);
 
             try plot.land.append(.{
                 .seed = key,
-                .flower = hash,
+                .bud = hash,
             });
         }
 
@@ -293,21 +311,21 @@ pub const PersistentPlot = struct {
         return plot;
     }
 
-    pub fn find(plot: *PersistentPlot, flower: dht.Hash) !Plant {
+    pub fn find(plot: *PersistentPlot, bud: dht.Hash) !Plant {
         if (plot.size == 0) {
             return error.NoPlants;
         }
         var l: usize = 0;
         var r: usize = plot.size - 1;
-        return plot.find_lr(flower, l, r);
+        return plot.find_lr(bud, l, r);
     }
 
-    pub fn find_lr(plot: *PersistentPlot, flower: dht.Hash, l_: usize, r_: usize) !Plant {
+    pub fn find_lr(plot: *PersistentPlot, bud: dht.Hash, l_: usize, r_: usize) !Plant {
         var l = l_;
         var r = r_;
         const ref = Plant{
             .seed = std.mem.zeroes(dht.Hash),
-            .flower = flower,
+            .bud = bud,
         };
 
         while (l != r) {
@@ -363,9 +381,9 @@ pub const PersistentPlot = struct {
 // n_blocks * block_size >= size of underlying persistent plot
 pub const IndexedPersistentPlot = struct {
     persistent: *PersistentPlot,
-    flower_index: std.ArrayList(dht.Hash), //evenly spread out flowers
+    bud_index: std.ArrayList(dht.Hash), //evenly spread out buds
     index_size: usize, //number of blocks
-    block_size: usize, //block size per flower
+    block_size: usize, //block size per bud
 
     pub fn init(alloc: std.mem.Allocator, persistent: *PersistentPlot, byte_size: usize) !*IndexedPersistentPlot {
         if (persistent.size == 0)
@@ -377,9 +395,9 @@ pub const IndexedPersistentPlot = struct {
 
         plot.* = .{
             .persistent = persistent,
-            .flower_index = std.ArrayList(dht.Hash).init(alloc), //evenly spread out flowers
+            .bud_index = std.ArrayList(dht.Hash).init(alloc), //evenly spread out buds
             .index_size = index_size, //number of blocks
-            .block_size = block_size, //block size per flower
+            .block_size = block_size, //block size per bud
         };
         // std.log.info("{}", .{plot.*});
 
@@ -390,14 +408,14 @@ pub const IndexedPersistentPlot = struct {
 
     pub fn setup_table(plot: *IndexedPersistentPlot) !void {
         std.log.info("Building table", .{});
-        try plot.flower_index.ensureTotalCapacity(plot.index_size);
+        try plot.bud_index.ensureTotalCapacity(plot.index_size);
         var i: usize = 0;
         while (i < plot.index_size) : (i += 1) {
             const index = (i + 1) * plot.block_size;
             const plant = try plot.persistent.get_plant(index);
-            try plot.flower_index.append(plant.flower);
+            try plot.bud_index.append(plant.bud);
         }
-        std.sort.sort(dht.Hash, plot.flower_index.items, {}, less_hash);
+        std.sort.sort(dht.Hash, plot.bud_index.items, {}, less_hash);
         std.log.info("Done building table", .{});
     }
 
@@ -409,13 +427,13 @@ pub const IndexedPersistentPlot = struct {
         return std.mem.order(u8, &a, &b);
     }
 
-    pub fn find(plot: *IndexedPersistentPlot, flower: dht.Hash) !Plant {
-        const idx = binarySearch(dht.Hash, flower, plot.flower_index.items, {}, order_hash);
+    pub fn find(plot: *IndexedPersistentPlot, bud: dht.Hash) !Plant {
+        const idx = binarySearch(dht.Hash, bud, plot.bud_index.items, {}, order_hash);
         // std.log.info("bin idx:{} size: {}, n: {}, bsize: {}", .{ idx, plot.persistent.size, plot.index_size, plot.block_size });
         const l = idx * plot.block_size;
         const r = std.math.min((idx + 1) * plot.block_size, plot.persistent.size - 1);
 
-        return plot.persistent.find_lr(flower, l, r);
+        return plot.persistent.find_lr(bud, l, r);
     }
 };
 
