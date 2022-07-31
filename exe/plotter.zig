@@ -41,6 +41,11 @@ pub fn main() anyerror!void {
     var plot_counter: usize = 0;
 
     while (true) {
+        if (plot_list.items.len == 1 and plot_list.items[0].size > N) {
+            std.log.info("Done Plotting", .{});
+            break;
+        }
+
         const plot_path = try std.fmt.allocPrint(allocator, "{s}/plot_{}", .{ options.options.tmp, plot_counter });
         plot_counter += 1;
         const persistent_plot = b: {
@@ -85,8 +90,5 @@ pub fn main() anyerror!void {
         try plot_list.append(merged_persistent_plot);
     }
 
-    const persistent_merged =
-        std.log.info("two full plots + persisting + persistent merge took: {}s", .{t2.lap() / std.time.ns_per_s});
-    //try persistent_merged.check_consistency();
-    persistent_merged.deinit();
+    std.log.info("full plots + persisting + persistent merge took: {}s", .{t2.lap() / std.time.ns_per_s});
 }
