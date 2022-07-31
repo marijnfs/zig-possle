@@ -340,6 +340,10 @@ pub const PersistentPlot = struct {
         return try plot.get_plant(l);
     }
 
+    pub fn delete_file(plot: *PersistentPlot) !void {
+        try std.fs.cwd().deleteFile(plot.path);
+    }
+
     pub fn reset_head(plot: *PersistentPlot) !void {
         try plot.file.seekTo(0);
     }
@@ -524,7 +528,7 @@ pub const MergePlotter = struct {
     }
 
     pub fn check_done(plotter: *MergePlotter) bool {
-        return plotter.plot_list.items.len == 1 and plotter.plot_list.items[0].land.items.len == plotter.final_size;
+        return plotter.plot_list.items.len == 1 and plotter.plot_list.items[0].land.items.len >= plotter.final_size;
     }
 
     pub fn extract_plot(plotter: *MergePlotter) *Plot {
