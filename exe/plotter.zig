@@ -20,8 +20,8 @@ pub fn main() anyerror!void {
         out: []const u8,
         tmp: []const u8,
         plot_bytesize: usize,
-        persistent_base_size: usize,
-        base_size: usize = 1024 * 1024,
+        persistent_base_bytesize: usize,
+        base_bytesize: usize = 1024 * 1024,
         n_threads: usize = 4,
     }, allocator, .print);
 
@@ -31,8 +31,8 @@ pub fn main() anyerror!void {
     std.log.info("{} bytes means {} buds need to be calculated", .{ options.options.plot_bytesize, N });
 
     var t2 = try std.time.Timer.start();
-    const base_N = options.options.base_size;
-    var merge_plotter = try plot.MergePlotter.init(allocator, N, base_N);
+    const base_N = options.options.base_bytesize / 64;
+    var merge_plotter = try plot.MergePlotter.init(allocator, options.options.persistent_base_bytesize / 64, base_N);
 
     const n_threads = options.options.n_threads;
 
@@ -65,29 +65,46 @@ pub fn main() anyerror!void {
         if (plot_list.items.len < 2)
             continue;
 
-        const last_plot = plot_list.items[plot_list.items.len - 1];
-        const prelast_plot = plot_list.items[plot_list.items.len - 2];
-
-        if (last_plot.size != prelast_plot.size)
-            continue;
         std.log.info("Merging", .{});
 
-        const merge_plot_path = try std.fmt.allocPrint(allocator, "{s}/plot_{}", .{ options.options.tmp, plot_counter });
-        plot_counter += 1;
+        while (true) {
+            if (plot_list.items.len < 2)
+                break;
 
-        const merged_persistent_plot = try plot.PersistentPlot.initMerged(allocator, merge_plot_path, last_plot, prelast_plot);
-        std.log.info("Removing merged plots", .{});
+            const last_plot = plot_list.items[plot_list.items.len - 1];
+            const prelast_plot = plot_list.items[plot_list.items.len - 2];
 
-        {
-            last_plot.deinit();
-            prelast_plot.deinit();
+            if (last_plot.size != prelast_plot.size)
+                break;
 
-            try last_plot.delete_file();
-            try prelast_plot.delete_file();
+            const merge_plot_path = b: {
+                if (plot_list.items.len == 2 and plot_list.items[0].size + plot_list.items[1].size > N) {
+                    std.log.info("Merging final plot", .{});
+                    break :b try std.fs.cwd().realpathAlloc(allocator, options.options.out);
+                } else {
+                    break :b try std.fmt.allocPrint(allocator, "{s}/plot_{}", .{ options.options.tmp, plot_counter });
+                }
+            };
+
+            plot_counter += 1;
+
+            std.log.info("Merging {s} {s} to {s}", .{ last_plot.path, prelast_plot.path, merge_plot_path });
+            const merged_persistent_plot = try plot.PersistentPlot.initMerged(allocator, merge_plot_path, last_plot, prelast_plot);
+            std.log.info("Removing merged plots", .{});
+
+            {
+                std.log.info("Deleting  {s} {s}", .{ last_plot.path, prelast_plot.path });
+
+                last_plot.deinit();
+                prelast_plot.deinit();
+
+                try last_plot.delete_file();
+                try prelast_plot.delete_file();
+            }
+
+            try plot_list.resize(plot_list.items.len - 2);
+            try plot_list.append(merged_persistent_plot);
         }
-
-        try plot_list.resize(plot_list.items.len - 2);
-        try plot_list.append(merged_persistent_plot);
     }
 
     std.log.info("full plots + persisting + persistent merge took: {}s", .{t2.lap() / std.time.ns_per_s});

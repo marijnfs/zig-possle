@@ -282,16 +282,16 @@ pub const PersistentPlot = struct {
         while (true) {
             if (Plant.lessThan({}, plant_a, plant_b)) {
                 try dht.serial.serialise(plant_a, buffered_writer.writer());
-                if (i_a >= source_plot_a.size)
-                    break;
                 plant_a = try read_plant(reader_a.reader());
                 i_a += 1;
+                if (i_a >= source_plot_a.size)
+                    break;
             } else {
                 try dht.serial.serialise(plant_b, buffered_writer.writer());
-                if (i_b >= source_plot_b.size)
-                    break;
                 plant_b = try read_plant(reader_b.reader());
                 i_b += 1;
+                if (i_b >= source_plot_b.size)
+                    break;
             }
         }
 
@@ -346,6 +346,10 @@ pub const PersistentPlot = struct {
 
     pub fn reset_head(plot: *PersistentPlot) !void {
         try plot.file.seekTo(0);
+    }
+
+    pub fn reset_to_plants(plot: *PersistentPlot) !void {
+        try plot.file.seekTo(@sizeOf(Header));
     }
 
     pub fn read_next_plant(plot: *PersistentPlot) !Plant {
