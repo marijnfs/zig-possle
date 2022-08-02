@@ -21,7 +21,9 @@ pub fn main() anyerror!void {
         tmp: []const u8,
         plot_bytesize: usize,
         persistent_base_bytesize: usize,
-        base_bytesize: usize = 1024 * 1024,
+        // base_bytesize: usize = 1024 * 1024,
+        base_bytesize: usize = 1024,
+
         n_threads: usize = 4,
     }, allocator, .print);
 
@@ -79,8 +81,10 @@ pub fn main() anyerror!void {
 
             const merge_plot_path = b: {
                 if (plot_list.items.len == 2 and plot_list.items[0].size + plot_list.items[1].size > N) {
-                    std.log.info("Merging final plot", .{});
-                    break :b try std.fs.cwd().realpathAlloc(allocator, options.options.out);
+                    std.log.info("getting path {s}", .{options.options.out});
+                    const final_path = try std.fs.cwd().realpathAlloc(allocator, options.options.out);
+                    std.log.info("Merging final plot {s}", .{final_path});
+                    break :b final_path;
                 } else {
                     break :b try std.fmt.allocPrint(allocator, "{s}/plot_{}", .{ options.options.tmp, plot_counter });
                 }

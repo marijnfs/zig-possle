@@ -260,15 +260,16 @@ pub const PersistentPlot = struct {
         const header_a = try source_plot_a.read_header();
         const header_b = try source_plot_b.read_header();
 
+        std.log.info("header_a: {}, header_b: {}", .{ header_a, header_b });
         if (header_a.size != source_plot_a.size or header_b.size != source_plot_b.size) {
             return error.InvalidHeader;
         }
 
         const read_plant = struct {
-            fn read_plant(reader: anytype) !Plant {
+            fn f(reader: anytype) !Plant {
                 return try dht.serial.deserialise(Plant, reader, null);
             }
-        }.read_plant;
+        }.f;
 
         var reader_a = std.io.bufferedReader(source_plot_a.file.reader());
         var reader_b = std.io.bufferedReader(source_plot_b.file.reader());
@@ -276,22 +277,28 @@ pub const PersistentPlot = struct {
         var plant_a = try read_plant(reader_a.reader());
         var plant_b = try read_plant(reader_b.reader());
 
-        var i_a: usize = 1; //we already read a plant
-        var i_b: usize = 1;
+        var i_a: usize = 0; //we already read a plant
+        var i_b: usize = 0;
 
         while (true) {
             if (Plant.lessThan({}, plant_a, plant_b)) {
                 try dht.serial.serialise(plant_a, buffered_writer.writer());
-                plant_a = try read_plant(reader_a.reader());
                 i_a += 1;
-                if (i_a >= source_plot_a.size)
+                if (i_a >= source_plot_a.size) {
+                    try dht.serial.serialise(plant_b, buffered_writer.writer());
+                    i_b += 1;
                     break;
+                }
+                plant_a = try read_plant(reader_a.reader());
             } else {
                 try dht.serial.serialise(plant_b, buffered_writer.writer());
-                plant_b = try read_plant(reader_b.reader());
                 i_b += 1;
-                if (i_b >= source_plot_b.size)
+                if (i_b >= source_plot_b.size) {
+                    try dht.serial.serialise(plant_a, buffered_writer.writer());
+                    i_a += 1;
                     break;
+                }
+                plant_b = try read_plant(reader_b.reader());
             }
         }
 
@@ -380,6 +387,11 @@ pub const PersistentPlot = struct {
             }
             plant_ref = plant_next;
         }
+    }
+
+    pub fn reopen(plot: *PersistentPlot) !void {
+        plot.file.close();
+        plot.file = try std.fs.cwd().openFile(plot.path, .{});
     }
 };
 
