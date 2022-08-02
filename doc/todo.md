@@ -1,5 +1,8 @@
 #Todos:
 
+- Output File needs to exist, seems realpath needs existing file
+- Program unreliably runs out of memory somehow
+
 - Implement simple miner p2p code that servers as experiment
   - Simple commit a message to each block, print it for each recieved block
   - Write graph block struct that keeps track and validates blocks
