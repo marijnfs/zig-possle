@@ -21,6 +21,7 @@ const Block = struct {
     time: i64 = 0,
     prev: ID = dht.id.zeroes(),
     hash: ID = dht.id.zeroes(),
+    height: f64 = 0,
 
     pub fn prehash(block: *const Block) Hash {
         return pos.plot.hash_fast_mul(&.{ &block.prev, &block.tx, &block.nonce });
@@ -31,7 +32,8 @@ const Api = union(enum) {
     block: Block,
 };
 
-var last_block = Block{};
+var block_db: std.AutoHashMap(Hash, Block) = undefined;
+var block_head = Block{};
 var cur_block = Block{};
 var closest_dist = dht.id.ones();
 
@@ -42,12 +44,28 @@ fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address) !void {
 
     const message = try dht.serial.deserialise_slice(Api, buf, std.heap.page_allocator);
 
+    // Verify the block
     const block = message.block;
     const prehash = block.prehash();
 
     const bud = try pos.plot.hash_slow(&block.seed);
     const dist = dht.id.xor(prehash, bud);
-    std.log.info("dist:{} t:{}", .{ hex(&dist), t });
+
+    //origin block
+    var prev_height: f64 = 0;
+    var prev_time: i64 = 0;
+    if (!std.mem.eql(u8, &block.prev, &std.mem.zeroes(Hash))) {
+        if (block_db.get(block.prev)) |prev_block| {
+            prev_height = prev_block.height;
+            prev_time = prev_block.time;
+        } else {
+            std.log.debug("Block refused, can't find prev block", .{});
+        }
+    }
+
+    // calculate the relative height of the block
+    const d_height: f64 = 3;
+    const new_height = prev_height + d_height;
 
     if (id_.less(dist, closest_dist)) {
         // accept block
