@@ -33,19 +33,24 @@ const Api = union(enum) {
 };
 
 var block_db: std.AutoHashMap(Hash, Block) = undefined;
-var block_head = Block{};
-var cur_block = Block{};
+var chain_head = Block{};
+var our_block = Block{};
 var closest_dist = dht.id.ones();
 
 fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address) !void {
-    std.log.info("Got broadcast: {} {}", .{ hex(&src_id), src_address });
+    std.log.info("Got broadcast: src:{} addr:{}", .{ hex(&src_id), src_address });
 
     const t = time.milliTimestamp();
-
+    std.log.info("time: {}", .{t});
     const message = try dht.serial.deserialise_slice(Api, buf, std.heap.page_allocator);
 
     // Verify the block
     const block = message.block;
+    std.log.info("tx:{}", .{hex(&block.tx)});
+
+    std.log.info("new chain head block.height: {}", .{block.height});
+    chain_head = block; //todo, fix. This is dumb acceptance of the block
+
     const prehash = block.prehash();
 
     const bud = try pos.plot.hash_slow(&block.seed);
@@ -67,6 +72,8 @@ fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address) !void {
     const d_height: f64 = 3;
     const new_height = prev_height + d_height;
 
+    std.log.info("new height: {}", .{new_height});
+
     if (id_.less(dist, closest_dist)) {
         // accept block
         closest_dist = dist;
@@ -80,12 +87,20 @@ fn direct_message_hook(buf: []const u8, src_id: dht.ID, src_address: net.Address
     std.log.info("Got direct message: {} {} {}", .{ dht.hex(buf), dht.hex(&src_id), src_address });
 }
 
+fn setup_our_block(seed: dht.ID) void {
+    our_block.seed = seed;
+    our_block.time = time.milliTimestamp();
+    our_block.height = chain_head.height + 4;
+}
+
 pub fn main() anyerror!void {
     const allocator = std.heap.page_allocator;
 
-    // Setup block
-    last_block.time = time.milliTimestamp();
-    dht.rng.random().bytes(&last_block.tx);
+    // Setup Chain block
+    chain_head.time = time.milliTimestamp();
+
+    // Setup Our block
+    dht.rng.random().bytes(&our_block.tx); //our 'vote'
 
     // Setup server
     const options = try args.parseForCurrentProcess(struct {
@@ -137,23 +152,25 @@ pub fn main() anyerror!void {
     try server.queue_broadcast("hello");
 
     while (true) {
-        // Setup cur_block
+        // Setup our_block
         // Update nonce and perhaps tx
-        dht.rng.random().bytes(&cur_block.nonce);
+        dht.rng.random().bytes(&our_block.nonce);
 
         // Get prehash
-        const prehash = cur_block.prehash();
+        const prehash = our_block.prehash();
         const search_plant = Plant{ .bud = prehash };
 
         const found = try persistent_merged_loaded.find(prehash);
-        const seed = found.seed;
+
         // const found = try indexed_plot.find(bud);
         const dist = dht.id.xor(found.bud, search_plant.bud);
 
         if (std.mem.order(u8, &dist, &closest_dist) == .lt) {
-            cur_block.seed = seed;
+            our_block.seed = found.seed;
             closest = found;
             closest_dist = dist;
+            setup_our_block(found.seed);
+
             std.log.info("\r[{}] persistent search:dist:{} {} got:{}", .{
                 i,
                 hex(&closest_dist),
@@ -161,7 +178,7 @@ pub fn main() anyerror!void {
                 hex(&found.bud),
             });
 
-            const msg = Api{ .block = cur_block };
+            const msg = Api{ .block = our_block };
             const buf = try dht.serial.serialise_alloc(msg, allocator);
             // defer allocator.free(msg);
             try server.queue_broadcast(buf);
