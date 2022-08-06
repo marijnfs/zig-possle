@@ -94,6 +94,7 @@ pub fn main() anyerror!void {
         plot_path: []const u8,
         remote_ip: ?[]const u8 = null,
         remote_port: ?u16 = null,
+        db_path: ?[]const u8 = null,
     }, std.heap.page_allocator, .print);
     if (options.options.ip == null or options.options.port == null) {
         std.log.warn("Ip not defined", .{});
@@ -103,27 +104,18 @@ pub fn main() anyerror!void {
 
     const address = try std.net.Address.parseIp(options.options.ip.?, options.options.port.?);
     const id = dht.id.rand_id();
-    var server = try dht.server.Server.init(address, id);
+    var server = try dht.server.Server.init(address, id, .{ .public = false });
     defer server.deinit();
 
     if (options.options.remote_ip != null and options.options.remote_port != null) {
         const address_remote = try std.net.Address.parseIp(options.options.remote_ip.?, options.options.remote_port.?);
-        try server.routing.add_address_seen(address_remote);
-        try server.job_queue.enqueue(.{ .connect = address_remote });
+        const public = true;
+        try server.routing.add_address_seen(address_remote, public);
+        try server.job_queue.enqueue(.{ .connect = .{ .address = address_remote, .public = true } });
     }
 
     try server.add_direct_message_hook(direct_message_hook);
     try server.add_broadcast_hook(broadcast_hook);
-
-    var timer_thread = try dht.timer.TimerThread.init(server.job_queue);
-    try timer_thread.add_timer(1000, dht.timer_functions.ping_finger_table, true);
-    try timer_thread.add_timer(4000, dht.timer_functions.sync_finger_table_with_routing, true);
-    try timer_thread.add_timer(5000, dht.timer_functions.search_finger_table, true);
-    try timer_thread.add_timer(10000, dht.timer_functions.bootstrap_connect_seen, true);
-    try timer_thread.start();
-
-    try server.start();
-    try server.queue_broadcast("hello");
 
     // Setup Mining
     const alloc = std.heap.page_allocator;
@@ -140,6 +132,9 @@ pub fn main() anyerror!void {
 
     const Plant = pos.Plant;
     var closest = std.mem.zeroes(Plant);
+
+    try server.start();
+    try server.queue_broadcast("hello");
 
     while (true) {
         // Setup cur_block

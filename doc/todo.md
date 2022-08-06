@@ -1,5 +1,7 @@
 #Todos:
 
+- Currently zig dht threads just go forever, and segfault when server is close
+  - Make sure the server can be ended and joined on (atomic bool to stop can work)
 - Output File needs to exist, seems realpath needs existing file
 - Program unreliably runs out of memory somehow
 

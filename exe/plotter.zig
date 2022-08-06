@@ -82,9 +82,10 @@ pub fn main() anyerror!void {
             const merge_plot_path = b: {
                 if (plot_list.items.len == 2 and plot_list.items[0].size + plot_list.items[1].size > N) {
                     std.log.info("getting path {s}", .{options.options.out});
-                    const final_path = try std.fs.cwd().realpathAlloc(allocator, options.options.out);
-                    std.log.info("Merging final plot {s}", .{final_path});
-                    break :b final_path;
+                    // const final_path = try std.fs.cwd().realpathAlloc(allocator, options.options.out);
+                    // std.log.info("Merging final plot {s}", .{options.options.out});
+                    // break :b final_path;
+                    break :b options.options.out;
                 } else {
                     break :b try std.fmt.allocPrint(allocator, "{s}/plot_{}", .{ options.options.tmp, plot_counter });
                 }
