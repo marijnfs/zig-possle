@@ -206,7 +206,7 @@ pub const PersistentPlot = struct {
     pub fn init(alloc: std.mem.Allocator, path: []const u8) !*PersistentPlot {
         var plot = try alloc.create(PersistentPlot);
         plot.* = .{
-            .file = try std.fs.cwd().createFile(path, .{ .read = true }),
+            .file = try std.fs.cwd().openFile(path, .{}),
             .size = 0,
             .path = path,
         };
