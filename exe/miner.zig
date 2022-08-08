@@ -71,6 +71,7 @@ fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address) !void {
     // calculate the relative height of the block
     const d_height: f64 = 3;
     const new_height = prev_height + d_height;
+    std.log.info("height {} t:{}", .{ new_height, t });
 
     std.log.info("new height: {}", .{new_height});
 
@@ -110,6 +111,7 @@ pub fn main() anyerror!void {
         remote_ip: ?[]const u8 = null,
         remote_port: ?u16 = null,
         db_path: ?[]const u8 = null,
+        public: bool = false,
     }, std.heap.page_allocator, .print);
     if (options.options.ip == null or options.options.port == null) {
         std.log.warn("Ip not defined", .{});
@@ -119,13 +121,12 @@ pub fn main() anyerror!void {
 
     const address = try std.net.Address.parseIp(options.options.ip.?, options.options.port.?);
     const id = dht.id.rand_id();
-    var server = try dht.server.Server.init(address, id, .{ .public = false });
+    var server = try dht.server.Server.init(address, id, .{ .public = options.options.public });
     defer server.deinit();
 
     if (options.options.remote_ip != null and options.options.remote_port != null) {
         const address_remote = try std.net.Address.parseIp(options.options.remote_ip.?, options.options.remote_port.?);
-        const public = true;
-        try server.routing.add_address_seen(address_remote, public);
+        try server.routing.add_address_seen(address_remote);
         try server.job_queue.enqueue(.{ .connect = .{ .address = address_remote, .public = true } });
     }
 
