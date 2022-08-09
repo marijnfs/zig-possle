@@ -55,6 +55,8 @@ fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address) !void {
 
     const bud = try pos.plot.hash_slow(&block.seed);
     const dist = dht.id.xor(prehash, bud);
+    const log_dist = pos.math.log2(dist);
+    std.log.info("dist:{} log:{}", .{ hex(&dist), log_dist });
 
     //origin block
     var prev_height: f64 = 0;
