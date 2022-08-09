@@ -325,7 +325,8 @@ pub const PersistentPlot = struct {
         }
         var l: usize = 0;
         var r: usize = plot.size - 1;
-        return plot.find_lr(bud, l, r);
+        // return plot.find_lr(bud, l, r);
+        return plot.find_lr_rec(bud, l, r);
     }
 
     pub fn find_lr(plot: *PersistentPlot, bud: dht.Hash, l_: usize, r_: usize) !Plant {
@@ -346,6 +347,65 @@ pub const PersistentPlot = struct {
             }
         }
         return try plot.get_plant(l);
+    }
+
+    pub fn find_lr_rec(plot: *PersistentPlot, bud: dht.Hash, l_: usize, r_: usize) !Plant {
+        var l = l_;
+        var r = r_;
+
+        var bit: usize = 0;
+
+        while (l != r) {
+            // std.log.info("l:{} r:{}", .{ l, r });
+            // what is our search bit on position 'bit'?
+            var byte: usize = bit / 8;
+            var bit_index: u3 = @intCast(u3, 7 - bit % 8); //bit index is reversed, 0 bit will be at 7'th pos in a byte (little endian)
+            var mask: u8 = 1;
+            mask <<= bit_index;
+            const search_bit = bud[byte] & mask > 0;
+
+            // find the first bit that is true in our search range
+            const first_true_bit = try plot.find_lr_bit(l, r, bit);
+            // std.log.info("bit:{} first:{}", .{ bit, first_true_bit });
+            //if they are all true or all false, we continue to the next bit
+            const all_true_or_false = first_true_bit == l or first_true_bit == r;
+
+            //if we look for true, first_true_bit is our new l
+            if (!all_true_or_false and search_bit) {
+                l = first_true_bit;
+            } else {
+                r = first_true_bit;
+            }
+
+            bit += 1;
+        }
+
+        // std.log.info("found {}", .{l});
+        return try plot.get_plant(l);
+    }
+
+    pub fn find_lr_bit(plot: *PersistentPlot, l_: usize, r_: usize, bit: usize) !usize {
+        var byte: usize = bit / 8;
+        var bit_index: u3 = @intCast(u3, 7 - bit % 8); //bit index is reversed, 0 bit will be at 7'th pos in a byte (little endian)
+
+        var l = l_;
+        var r = r_;
+
+        while (l != r) {
+            const m = l + (r - l) / 2;
+            const plant = try plot.get_plant(m);
+            var mask: u8 = 1;
+            mask <<= bit_index;
+            const bit_on = plant.bud[byte] & mask > 0;
+
+            if (bit_on) {
+                r = m;
+            } else {
+                l = m + 1;
+            }
+        }
+
+        return l;
     }
 
     pub fn delete_file(plot: *PersistentPlot) !void {
