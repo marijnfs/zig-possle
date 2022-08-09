@@ -181,6 +181,8 @@ pub fn main() anyerror!void {
                 hex(&found.bud),
             });
 
+            std.log.info("log:{}", .{pos.math.log2(closest_dist)});
+
             const msg = Api{ .block = our_block };
             const buf = try dht.serial.serialise_alloc(msg, allocator);
             // defer allocator.free(msg);
