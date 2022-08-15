@@ -78,7 +78,6 @@ var block_db: std.AutoHashMap(Hash, Block) = undefined;
 var chain_head = Block{};
 var our_block = Block{};
 var closest_dist = dht.id.ones();
-var highest_difficulty: f64 = 0;
 
 fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address) !void {
     std.log.info("Got broadcast: src:{} addr:{}", .{ hex(&src_id), src_address });
@@ -116,12 +115,7 @@ fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address) !void {
     // std.log.info("difficulty: {}", .{new_difficulty});
 
     if (block.total_difficulty > chain_head.total_difficulty) {
-        // accept block
-        highest_difficulty = block.total_difficulty;
-        chain_head = block;
-        closest_dist = dht.id.ones(); //reset closest
-
-        std.log.info("accepted {}", .{chain_head});
+        accept_block(block);
     }
 }
 
@@ -140,6 +134,14 @@ fn setup_our_block(seed: dht.ID) void {
     our_block.calculate_difficulty();
     our_block.total_difficulty = chain_head.total_difficulty + our_block.total_difficulty;
     our_block.total_embargo = chain_head.total_embargo + our_block.embargo;
+}
+
+fn accept_block(block: Block) void {
+    std.log.info("+++ Accepting block tx:{}", .{hex(&block.tx)});
+
+    chain_head = block;
+    closest_dist = dht.id.ones(); //reset closest
+    setup_our_block(id_.ones());
 }
 
 pub fn main() anyerror!void {
@@ -210,9 +212,7 @@ pub fn main() anyerror!void {
             try server.queue_broadcast(buf);
 
             //accept our new block
-            chain_head = our_block;
-            closest_dist = dht.id.ones(); //reset closest
-            setup_our_block(id_.ones());
+            accept_block(our_block);
         }
 
         // Setup our_block
