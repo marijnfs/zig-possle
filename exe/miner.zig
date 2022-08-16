@@ -123,7 +123,7 @@ fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address) !void {
 
         try accept_block(block);
     } else {
-        std.log.info("not accepting block: other:{} mine:{}", .{ block.total_difficulty, chain_head.total_difficulty });
+        std.log.info("not accepting block {}: other:{} mine:{}", .{ hex(&block.hash), block.total_difficulty, chain_head.total_difficulty });
     }
 }
 
@@ -150,7 +150,7 @@ fn setup_our_block(seed: dht.ID) !void {
 var accept_mutex = std.Thread.Mutex{};
 
 fn accept_block(block: Block) !void {
-    std.log.info("acception block hash: {}, embargo: {}", .{ hex(&block.hash), block.total_embargo });
+    std.log.info("accepting block hash: {}, embargo: {}, curtime: {}", .{ hex(&block.hash), block.total_embargo, time.milliTimestamp() });
     accept_mutex.lock();
     defer accept_mutex.unlock();
 
@@ -240,6 +240,7 @@ pub fn main() anyerror!void {
         // Update nonce and perhaps tx
         dht.rng.random().bytes(&our_block.nonce);
         our_block.time = t;
+        try setup_our_block(id_.ones());
 
         // Get prehash
         our_block.calculate_prehash();
