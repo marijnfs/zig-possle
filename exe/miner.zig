@@ -66,6 +66,7 @@ const Block = struct {
     pub fn calculate_difficulty(block: *Block) void {
         const dist = dht.id.xor(block.prehash, block.bud);
         block.difficulty = distance_to_difficulty(dist);
+        // std.log.info("diff: {}, {}", .{ hex(&dist), block.difficulty });
         block.embargo = @floatToInt(i64, 40.0 / block.difficulty * 1000.0);
     }
 };
@@ -80,17 +81,19 @@ var our_block = Block{};
 var closest_dist = dht.id.ones();
 
 fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address) !void {
-    std.log.info("Got broadcast: src:{} addr:{}", .{ hex(&src_id), src_address });
+    _ = src_address;
+    _ = src_id;
+    // std.log.info("Got broadcast: src:{} addr:{}", .{ hex(&src_id), src_address });
 
-    const t = time.milliTimestamp();
-    std.log.info("time: {}", .{t});
+    // const t = time.milliTimestamp();
+    // std.log.info("time: {}", .{t});
     const message = try dht.serial.deserialise_slice(Api, buf, std.heap.page_allocator);
 
     // Verify the block
     var block = message.block;
-    std.log.info("tx:{}", .{hex(&block.tx)});
+    // std.log.info("tx:{}", .{hex(&block.tx)});
 
-    std.log.info("new chain head block.height: {}", .{block.height});
+    // std.log.info("new chain head block.height: {}", .{block.height});
 
     // Todo: Create copy and recalculate parameters to verify
     // _ = block.calculate_prehash();
@@ -115,6 +118,9 @@ fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address) !void {
     // std.log.info("difficulty: {}", .{new_difficulty});
 
     if (block.total_difficulty > chain_head.total_difficulty) {
+        std.log.info("Accepting received block", .{});
+        std.log.info("block total difficulty: {}, chain head: {}", .{ block.total_difficulty, chain_head.total_difficulty });
+
         accept_block(block);
     }
 }
@@ -132,15 +138,25 @@ fn setup_our_block(seed: dht.ID) void {
     our_block.height = chain_head.height + 1;
 
     our_block.calculate_difficulty();
-    our_block.total_difficulty = chain_head.total_difficulty + our_block.total_difficulty;
+    // std.log.info("chain total diff{} + our diff{}", .{ chain_head.total_difficulty, our_block.difficulty });
+    our_block.total_difficulty = chain_head.total_difficulty + our_block.difficulty;
     our_block.total_embargo = chain_head.total_embargo + our_block.embargo;
+    our_block.calculate_hash();
 }
 
+var accept_mutex = std.Thread.Mutex{};
+
 fn accept_block(block: Block) void {
-    std.log.info("+++ Accepting block tx:{}", .{hex(&block.tx)});
+    accept_mutex.lock();
+    defer accept_mutex.unlock();
+
+    if (!id_.is_equal(chain_head.hash, block.prev)) {
+        std.log.info("Chain overwritten {} {}", .{ hex(&chain_head.hash), hex(&block.prev) });
+    }
 
     chain_head = block;
     closest_dist = dht.id.ones(); //reset closest
+
     setup_our_block(id_.ones());
 }
 
@@ -212,6 +228,7 @@ pub fn main() anyerror!void {
             try server.queue_broadcast(buf);
 
             //accept our new block
+            std.log.info("Accepting own block", .{});
             accept_block(our_block);
         }
 
@@ -233,7 +250,6 @@ pub fn main() anyerror!void {
 
             closest_dist = dist;
             setup_our_block(found.seed);
-
             // std.log.info("\r[{}] persistent search:dist:{} {} got:{}", .{
             //     i,
             //     hex(&closest_dist),
