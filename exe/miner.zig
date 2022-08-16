@@ -59,7 +59,7 @@ const Block = struct {
         });
     }
 
-    pub fn calculate_bud(block: *Block) void {
+    pub fn calculate_bud(block: *Block) !void {
         block.bud = try pos.plot.hash_slow(&block.seed);
     }
 
@@ -67,7 +67,7 @@ const Block = struct {
         const dist = dht.id.xor(block.prehash, block.bud);
         block.difficulty = distance_to_difficulty(dist);
         // std.log.info("diff: {}, {}", .{ hex(&dist), block.difficulty });
-        block.embargo = @floatToInt(i64, 40.0 / block.difficulty * 1000.0);
+        block.embargo = @floatToInt(i64, 100.0 / block.difficulty * 1000.0);
     }
 };
 
@@ -121,7 +121,9 @@ fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address) !void {
         std.log.info("Accepting received block", .{});
         std.log.info("block total difficulty: {}, chain head: {}", .{ block.total_difficulty, chain_head.total_difficulty });
 
-        accept_block(block);
+        try accept_block(block);
+    } else {
+        std.log.info("not accepting block: other:{} mine:{}", .{ block.total_difficulty, chain_head.total_difficulty });
     }
 }
 
@@ -131,9 +133,10 @@ fn direct_message_hook(buf: []const u8, src_id: dht.ID, src_address: net.Address
     std.log.info("Got direct message: {} {} {}", .{ dht.hex(buf), dht.hex(&src_id), src_address });
 }
 
-fn setup_our_block(seed: dht.ID) void {
+fn setup_our_block(seed: dht.ID) !void {
     our_block.prev = chain_head.hash;
     our_block.seed = seed;
+    try our_block.calculate_bud();
     our_block.time = time.milliTimestamp();
     our_block.height = chain_head.height + 1;
 
@@ -146,7 +149,8 @@ fn setup_our_block(seed: dht.ID) void {
 
 var accept_mutex = std.Thread.Mutex{};
 
-fn accept_block(block: Block) void {
+fn accept_block(block: Block) !void {
+    std.log.info("acception block hash: {}, embargo: {}", .{ hex(&block.hash), block.total_embargo });
     accept_mutex.lock();
     defer accept_mutex.unlock();
 
@@ -157,7 +161,7 @@ fn accept_block(block: Block) void {
     chain_head = block;
     closest_dist = dht.id.ones(); //reset closest
 
-    setup_our_block(id_.ones());
+    try setup_our_block(id_.ones());
 }
 
 pub fn main() anyerror!void {
@@ -169,7 +173,7 @@ pub fn main() anyerror!void {
 
     // Setup Our block
     dht.rng.random().bytes(&our_block.tx); //our 'vote'
-    setup_our_block(id_.ones());
+    try setup_our_block(id_.ones());
 
     // Setup server
     const options = try args.parseForCurrentProcess(struct {
@@ -229,7 +233,7 @@ pub fn main() anyerror!void {
 
             //accept our new block
             std.log.info("Accepting own block", .{});
-            accept_block(our_block);
+            try accept_block(our_block);
         }
 
         // Setup our_block
@@ -249,7 +253,7 @@ pub fn main() anyerror!void {
             our_block.bud = found.bud;
 
             closest_dist = dist;
-            setup_our_block(found.seed);
+            try setup_our_block(found.seed);
             // std.log.info("\r[{}] persistent search:dist:{} {} got:{}", .{
             //     i,
             //     hex(&closest_dist),
