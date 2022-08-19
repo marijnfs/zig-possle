@@ -56,6 +56,7 @@ const Block = struct {
             std.mem.asBytes(&block.difficulty),
             std.mem.asBytes(&block.total_difficulty),
             std.mem.asBytes(&block.embargo),
+            std.mem.asBytes(&block.total_embargo),
         });
     }
 
@@ -63,7 +64,7 @@ const Block = struct {
         block.bud = try pos.plot.hash_slow(&block.seed);
     }
 
-    pub fn calculate_difficulty(block: *Block) void {
+    pub fn calculate_embargo(block: *Block) void {
         const dist = dht.id.xor(block.prehash, block.bud);
         block.difficulty = distance_to_difficulty(dist);
         // std.log.info("diff: {}, {}", .{ hex(&dist), block.difficulty });
@@ -97,7 +98,7 @@ fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address) !void {
 
     // Todo: Create copy and recalculate parameters to verify
     // _ = block.calculate_prehash();
-    // block.calculate_difficulty();
+    // block.calculate_embargo();
 
     //origin block
     // var prev_height: f64 = chain_head.height;
@@ -136,11 +137,13 @@ fn direct_message_hook(buf: []const u8, src_id: dht.ID, src_address: net.Address
 fn setup_our_block(seed: dht.ID) !void {
     our_block.prev = chain_head.hash;
     our_block.seed = seed;
+    // our_block.tx =
     try our_block.calculate_bud();
     our_block.time = time.milliTimestamp();
     our_block.height = chain_head.height + 1;
 
-    our_block.calculate_difficulty();
+    our_block.calculate_prehash();
+    our_block.calculate_embargo();
     // std.log.info("chain total diff{} + our diff{}", .{ chain_head.total_difficulty, our_block.difficulty });
     our_block.total_difficulty = chain_head.total_difficulty + our_block.difficulty;
     our_block.total_embargo = chain_head.total_embargo + our_block.embargo;
