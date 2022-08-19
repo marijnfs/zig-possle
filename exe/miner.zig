@@ -250,6 +250,7 @@ pub fn main() anyerror!void {
         const dist = dht.id.xor(found.bud, our_block.prehash);
 
         if (std.mem.order(u8, &dist, &closest_dist) == .lt) {
+            std.log.info("I:{} have chain total difficulty:{}, our diff: {}", .{ hex(&server.id), chain_head.total_difficulty, our_block.total_difficulty });
             our_block.seed = found.seed;
             our_block.bud = found.bud;
 
