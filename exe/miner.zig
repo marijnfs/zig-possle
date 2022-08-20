@@ -74,6 +74,8 @@ const Block = struct {
 
 const Api = union(enum) {
     block: Block,
+    req: bool,
+    rep: bool,
 };
 
 var block_db = std.AutoHashMap(Hash, Block).init(std.heap.page_allocator);
@@ -81,17 +83,39 @@ var chain_head = Block{};
 var our_block = Block{};
 var closest_dist = dht.id.ones();
 
-fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address) !void {
+fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address, server: *dht.Server) !void {
+    const allocator = std.heap.page_allocator;
+
     _ = src_address;
     _ = src_id;
     // std.log.info("Got broadcast: src:{} addr:{}", .{ hex(&src_id), src_address });
 
     // const t = time.milliTimestamp();
     // std.log.info("time: {}", .{t});
-    const message = try dht.serial.deserialise_slice(Api, buf, std.heap.page_allocator);
+    const message = try dht.serial.deserialise_slice(Api, buf, allocator);
 
     // Verify the block
-    var block = message.block;
+    switch (message) {
+        .block => |block| {
+            if (block.total_difficulty > chain_head.total_difficulty) {
+                std.log.info("Accepting received block", .{});
+                std.log.info("block total difficulty: {}, chain head: {}", .{ block.total_difficulty, chain_head.total_difficulty });
+
+                try accept_block(block);
+            } else {
+                std.log.info("not accepting block {}: other:{} mine:{}", .{ hex(&block.hash), block.total_difficulty, chain_head.total_difficulty });
+            }
+        },
+        .req => {
+            const msg = Api{ .rep = true };
+            const send_buf = try dht.serial.serialise_alloc(msg, allocator);
+            // defer allocator.free(msg);
+            try server.queue_broadcast(send_buf);
+        },
+        .rep => {
+            std.log.info("Got Rep from: {}", .{hex(src_id[0..8])});
+        },
+    }
     // std.log.info("tx:{}", .{hex(&block.tx)});
 
     // std.log.info("new chain head block.height: {}", .{block.height});
@@ -118,17 +142,9 @@ fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address) !void {
     // std.log.info("height {} t:{}", .{ new_height, t });
     // std.log.info("difficulty: {}", .{new_difficulty});
 
-    if (block.total_difficulty > chain_head.total_difficulty) {
-        std.log.info("Accepting received block", .{});
-        std.log.info("block total difficulty: {}, chain head: {}", .{ block.total_difficulty, chain_head.total_difficulty });
-
-        try accept_block(block);
-    } else {
-        std.log.info("not accepting block {}: other:{} mine:{}", .{ hex(&block.hash), block.total_difficulty, chain_head.total_difficulty });
-    }
 }
 
-fn direct_message_hook(buf: []const u8, src_id: dht.ID, src_address: net.Address) !void {
+fn direct_message_hook(buf: []const u8, src_id: dht.ID, src_address: net.Address, _: *dht.Server) !void {
     // const t = time.time();
 
     std.log.info("Got direct message: {} {} {}", .{ dht.hex(buf), dht.hex(&src_id), src_address });
@@ -146,6 +162,7 @@ fn setup_our_block(seed: dht.ID) !void {
     // std.log.info("chain total diff{} + our diff{}", .{ chain_head.total_difficulty, our_block.difficulty });
     our_block.total_difficulty = chain_head.total_difficulty + our_block.difficulty;
     our_block.total_embargo = chain_head.total_embargo + our_block.embargo;
+
     our_block.calculate_hash();
 }
 
@@ -165,20 +182,20 @@ fn accept_block(new_block: Block) !void {
     // loop back
     {
         var cur_hash = new_block.hash;
-        var prev_t = new_block.time;
+        var prev_t = new_block.total_embargo;
         while (block_db.get(cur_hash)) |block| {
             if (id_.is_zero(cur_hash))
                 break;
             std.log.info("bid:{} t:{} dt:{} hash:{}  diff:{} parent:{}", .{
                 block.height,
                 block.time,
-                prev_t - block.time,
+                prev_t - block.total_embargo,
                 hex(cur_hash[0..8]),
                 block.total_difficulty,
                 hex(block.prev[0..8]),
             });
             cur_hash = block.prev;
-            prev_t = block.time;
+            prev_t = block.total_embargo;
         }
     }
 
@@ -186,6 +203,21 @@ fn accept_block(new_block: Block) !void {
     closest_dist = dht.id.ones(); //reset closest
 
     try setup_our_block(id_.ones());
+}
+
+pub fn read_and_send(server: *dht.Server) anyerror!void {
+    // const allocator = std.heap.page_allocator;
+
+    const stdin = std.io.getStdIn().reader();
+    var buf: [100]u8 = undefined;
+    while (true) {
+        _ = try stdin.readUntilDelimiterOrEof(buf[0..], '\n');
+        std.log.info("read line", .{});
+        _ = server;
+        // const msg = Api{ .req = true };
+        // const send_buf = try dht.serial.serialise_alloc(msg, allocator);
+        // try server.queue_broadcast(send_buf);
+    }
 }
 
 pub fn main() anyerror!void {
@@ -219,6 +251,11 @@ pub fn main() anyerror!void {
     const id = dht.id.rand_id();
     var server = try dht.server.Server.init(address, id, .{ .public = options.options.public });
     defer server.deinit();
+
+    // Line reader for interaction
+    // const read_and_send_frame = async read_and_send(server);
+    // _ = async read_and_send(server);
+    std.log.info("After frame", .{});
 
     if (options.options.remote_ip != null and options.options.remote_port != null) {
         const address_remote = try std.net.Address.parseIp(options.options.remote_ip.?, options.options.remote_port.?);
@@ -298,4 +335,5 @@ pub fn main() anyerror!void {
     }
 
     try server.wait();
+    // try await read_and_send_frame;
 }
