@@ -76,7 +76,7 @@ const Api = union(enum) {
     block: Block,
 };
 
-var block_db: std.AutoHashMap(Hash, Block) = undefined;
+var block_db = std.AutoHashMap(Hash, Block).init(std.heap.page_allocator);
 var chain_head = Block{};
 var our_block = Block{};
 var closest_dist = dht.id.ones();
@@ -139,7 +139,6 @@ fn setup_our_block(seed: dht.ID) !void {
     our_block.seed = seed;
     // our_block.tx =
     try our_block.calculate_bud();
-    our_block.time = time.milliTimestamp();
     our_block.height = chain_head.height + 1;
 
     our_block.calculate_prehash();
@@ -152,16 +151,38 @@ fn setup_our_block(seed: dht.ID) !void {
 
 var accept_mutex = std.Thread.Mutex{};
 
-fn accept_block(block: Block) !void {
-    std.log.info("accepting block hash: {}, embargo: {}, curtime: {}", .{ hex(&block.hash), block.total_embargo, time.milliTimestamp() });
+fn accept_block(new_block: Block) !void {
+    std.log.info("accepting block hash: {}, embargo: {}, curtime: {}", .{ hex(&new_block.hash), new_block.total_embargo, time.milliTimestamp() });
     accept_mutex.lock();
     defer accept_mutex.unlock();
 
-    if (!id_.is_equal(chain_head.hash, block.prev)) {
-        std.log.info("Chain overwritten {} {}", .{ hex(&chain_head.hash), hex(&block.prev) });
+    if (!id_.is_equal(chain_head.hash, new_block.prev)) {
+        std.log.info("Chain overwritten {} {}", .{ hex(&chain_head.hash), hex(&new_block.prev) });
     }
 
-    chain_head = block;
+    try block_db.put(new_block.hash, new_block);
+
+    // loop back
+    {
+        var cur_hash = new_block.hash;
+        var prev_t = new_block.time;
+        while (block_db.get(cur_hash)) |block| {
+            if (id_.is_zero(cur_hash))
+                break;
+            std.log.info("bid:{} t:{} dt:{} hash:{}  diff:{} parent:{}", .{
+                block.height,
+                block.time,
+                prev_t - block.time,
+                hex(cur_hash[0..8]),
+                block.total_difficulty,
+                hex(block.prev[0..8]),
+            });
+            cur_hash = block.prev;
+            prev_t = block.time;
+        }
+    }
+
+    chain_head = new_block;
     closest_dist = dht.id.ones(); //reset closest
 
     try setup_our_block(id_.ones());
@@ -247,13 +268,14 @@ pub fn main() anyerror!void {
 
         // Get prehash
         our_block.calculate_prehash();
-        const found = try persistent_merged_loaded.find(our_block.prehash);
+        const prehash = our_block.prehash;
+        const found = try persistent_merged_loaded.find(prehash);
 
         // const found = try indexed_plot.find(bud);
-        const dist = dht.id.xor(found.bud, our_block.prehash);
+        const dist = dht.id.xor(found.bud, prehash);
 
         if (std.mem.order(u8, &dist, &closest_dist) == .lt) {
-            std.log.info("I:{} have chain total difficulty:{}, our diff: {}", .{ hex(&server.id), chain_head.total_difficulty, our_block.total_difficulty });
+            // std.log.info("I:{} have chain hash: {} diff:{}, our diff:{}", .{ hex(server.id[0..8]), hex(chain_head.hash[0..8]), chain_head.total_difficulty, our_block.total_difficulty });
             our_block.seed = found.seed;
             our_block.bud = found.bud;
 
