@@ -205,18 +205,36 @@ fn accept_block(new_block: Block) !void {
     try setup_our_block(id_.ones());
 }
 
-pub fn read_and_send(server: *dht.Server) anyerror!void {
-    // const allocator = std.heap.page_allocator;
+pub fn read_and_send(server: *dht.Server) !void {
+    _ = server;
+    nosuspend {
+        const allocator = std.heap.page_allocator;
 
-    const stdin = std.io.getStdIn().reader();
-    var buf: [100]u8 = undefined;
-    while (true) {
-        _ = try stdin.readUntilDelimiterOrEof(buf[0..], '\n');
-        std.log.info("read line", .{});
-        _ = server;
-        // const msg = Api{ .req = true };
-        // const send_buf = try dht.serial.serialise_alloc(msg, allocator);
-        // try server.queue_broadcast(send_buf);
+        var stdin = std.io.getStdIn();
+        stdin.intended_io_mode = .blocking;
+        var stdout = std.io.getStdOut();
+        stdout.intended_io_mode = .blocking;
+
+        var buf: [100]u8 = undefined;
+        while (true) {
+            const n = try stdin.reader().readUntilDelimiterOrEof(buf[0..], '\n');
+            if (n) |_| {} else {
+                std.log.info("Std in ended", .{});
+                break;
+            }
+            std.log.info("read line", .{});
+
+            // send req broadcast
+            const msg = Api{ .req = true };
+            const send_buf = try dht.serial.serialise_alloc(msg, allocator);
+            try server.queue_broadcast(send_buf);
+
+            try stdout.writeAll("fingers:\n");
+            try server.finger_table.summarize(stdout.writer());
+            try stdout.writeAll("public fingers:\n");
+            try server.public_finger_table.summarize(stdout.writer());
+            // }
+        }
     }
 }
 
@@ -240,6 +258,7 @@ pub fn main() anyerror!void {
         remote_port: ?u16 = null,
         db_path: ?[]const u8 = null,
         public: bool = false,
+        req_thread: bool = false,
     }, std.heap.page_allocator, .print);
     if (options.options.ip == null or options.options.port == null) {
         std.log.warn("Ip not defined", .{});
@@ -254,7 +273,10 @@ pub fn main() anyerror!void {
 
     // Line reader for interaction
     // const read_and_send_frame = async read_and_send(server);
-    // _ = async read_and_send(server);
+    var read_frame: std.Thread = undefined;
+    if (options.options.req_thread) {
+        read_frame = try std.Thread.spawn(.{}, read_and_send, .{server});
+    }
     std.log.info("After frame", .{});
 
     if (options.options.remote_ip != null and options.options.remote_port != null) {
