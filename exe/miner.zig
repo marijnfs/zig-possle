@@ -76,6 +76,7 @@ const Api = union(enum) {
     block: Block,
     req: bool,
     rep: bool,
+    req_block: Hash,
 };
 
 var block_db = std.AutoHashMap(Hash, Block).init(std.heap.page_allocator);
@@ -87,7 +88,7 @@ fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address, server:
     const allocator = std.heap.page_allocator;
 
     _ = src_address;
-    _ = src_id;
+    // _ = src_id;
     // std.log.info("Got broadcast: src:{} addr:{}", .{ hex(&src_id), src_address });
 
     // const t = time.milliTimestamp();
@@ -101,7 +102,7 @@ fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address, server:
                 std.log.info("Accepting received block", .{});
                 std.log.info("block total difficulty: {}, chain head: {}", .{ block.total_difficulty, chain_head.total_difficulty });
 
-                try accept_block(block);
+                try accept_block(block, server);
             } else {
                 std.log.info("not accepting block {}: other:{} mine:{}", .{ hex(&block.hash), block.total_difficulty, chain_head.total_difficulty });
             }
@@ -115,6 +116,7 @@ fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address, server:
         .rep => {
             std.log.info("Got Rep from: {}", .{hex(src_id[0..8])});
         },
+        else => {},
     }
     // std.log.info("tx:{}", .{hex(&block.tx)});
 
@@ -144,10 +146,33 @@ fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address, server:
 
 }
 
-fn direct_message_hook(buf: []const u8, src_id: dht.ID, src_address: net.Address, _: *dht.Server) !void {
+fn direct_message_hook(buf: []const u8, src_id: dht.ID, src_address: net.Address, server: *dht.Server) !void {
     // const t = time.time();
 
     std.log.info("Got direct message: {} {} {}", .{ dht.hex(buf), dht.hex(&src_id), src_address });
+    const allocator = std.heap.page_allocator;
+
+    _ = src_address;
+    // _ = src_id;
+    const message = try dht.serial.deserialise_slice(Api, buf, allocator);
+    switch (message) {
+        .block => |block| {
+            std.log.info("Storing block {}", .{hex(block.hash[0..8])});
+            try block_db.put(block.hash, block);
+        },
+        .req_block => |hash| {
+            if (block_db.get(hash)) |block| {
+                const msg = Api{ .block = block };
+                const send_buf = try dht.serial.serialise_alloc(msg, allocator);
+                try server.queue_direct_message(src_id, send_buf);
+            } else {
+                std.log.info("Dropping req block for hash: {}", .{hex(hash[0..8])});
+            }
+        },
+        else => {
+            std.log.info("Not block", .{});
+        },
+    }
 }
 
 fn setup_our_block(seed: dht.ID) !void {
@@ -168,7 +193,8 @@ fn setup_our_block(seed: dht.ID) !void {
 
 var accept_mutex = std.Thread.Mutex{};
 
-fn accept_block(new_block: Block) !void {
+fn accept_block(new_block: Block, server: *dht.Server) !void {
+    const allocator = std.heap.page_allocator;
     std.log.info("accepting block hash: {}, embargo: {}, curtime: {}", .{ hex(&new_block.hash), new_block.total_embargo, time.milliTimestamp() });
     accept_mutex.lock();
     defer accept_mutex.unlock();
@@ -196,6 +222,15 @@ fn accept_block(new_block: Block) !void {
             });
             cur_hash = block.prev;
             prev_t = block.total_embargo;
+        }
+
+        if (!id_.is_zero(cur_hash)) {
+            if (try server.finger_table.get_random_active_finger()) |*finger| {
+                const req_hash = Api{ .req_block = cur_hash };
+                const buf = try dht.serial.serialise_alloc(req_hash, allocator);
+
+                try server.queue_direct_message(finger.id, buf);
+            }
         }
     }
 
@@ -316,7 +351,7 @@ pub fn main() anyerror!void {
 
             //accept our new block
             std.log.info("Accepting own block", .{});
-            try accept_block(our_block);
+            try accept_block(our_block, server);
         }
 
         // Setup our_block
