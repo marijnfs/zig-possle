@@ -175,9 +175,11 @@ fn direct_message_hook(buf: []const u8, src_id: dht.ID, src_address: net.Address
     }
 }
 
+var setup_mutex = std.Thread.Mutex{};
+
 fn setup_our_block(seed: dht.ID) !void {
-    accept_mutex.lock();
-    defer accept_mutex.unlock();
+    setup_mutex.lock();
+    defer setup_mutex.unlock();
 
     our_block.prev = chain_head.hash;
     our_block.seed = seed;
