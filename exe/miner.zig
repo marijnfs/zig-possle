@@ -324,23 +324,22 @@ pub fn main() anyerror!void {
     try server.add_direct_message_hook(direct_message_hook);
     try server.add_broadcast_hook(broadcast_hook);
 
-    // Setup Mining
-    const alloc = std.heap.page_allocator;
-    const persistent_merged_loaded = try pos.plot.PersistentPlot.init(alloc, options.options.plot_path);
-
-    const mem_bytes = 1024 * 1024; //1mb
-    const indexed_plot = try pos.plot.IndexedPersistentPlot.init(alloc, persistent_merged_loaded, mem_bytes);
-
-    std.log.info("{}", .{persistent_merged_loaded.size});
-    std.log.info("block size:{} #:{}", .{ indexed_plot.block_size, indexed_plot.index_size });
-
-    std.log.info("Start mining", .{});
-    var i: usize = 0;
-
     try server.start();
-    try server.queue_broadcast("hello");
 
     if (options.options.enable_mining) {
+        // Setup Mining
+        const alloc = std.heap.page_allocator;
+        const persistent_merged_loaded = try pos.plot.PersistentPlot.init(alloc, options.options.plot_path);
+
+        const mem_bytes = 1024 * 1024; //1mb
+        const indexed_plot = try pos.plot.IndexedPersistentPlot.init(alloc, persistent_merged_loaded, mem_bytes);
+
+        std.log.info("{}", .{persistent_merged_loaded.size});
+        std.log.info("block size:{} #:{}", .{ indexed_plot.block_size, indexed_plot.index_size });
+
+        std.log.info("Start mining", .{});
+        var i: usize = 0;
+
         while (true) {
             const t = time.milliTimestamp();
             if (t > our_block.total_embargo) { //time to send block
