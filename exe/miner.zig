@@ -294,6 +294,7 @@ pub fn main() anyerror!void {
         db_path: ?[]const u8 = null,
         public: bool = false,
         req_thread: bool = false,
+        enable_mining: bool = true,
     }, std.heap.page_allocator, .print);
     if (options.options.ip == null or options.options.port == null) {
         std.log.warn("Ip not defined", .{});
@@ -339,56 +340,58 @@ pub fn main() anyerror!void {
     try server.start();
     try server.queue_broadcast("hello");
 
-    while (true) {
-        const t = time.milliTimestamp();
-        if (t > our_block.total_embargo) { //time to send block
-            std.log.info("embargo passed, sending time: {}, embargo: {}", .{ t, our_block.total_embargo });
+    if (options.options.enable_mining) {
+        while (true) {
+            const t = time.milliTimestamp();
+            if (t > our_block.total_embargo) { //time to send block
+                std.log.info("embargo passed, sending time: {}, embargo: {}", .{ t, our_block.total_embargo });
 
-            const msg = Api{ .block = our_block };
-            const buf = try dht.serial.serialise_alloc(msg, allocator);
-            // defer allocator.free(msg);
-            try server.queue_broadcast(buf);
+                const msg = Api{ .block = our_block };
+                const buf = try dht.serial.serialise_alloc(msg, allocator);
+                // defer allocator.free(msg);
+                try server.queue_broadcast(buf);
 
-            //accept our new block
-            std.log.info("Accepting own block", .{});
-            try accept_block(our_block, server);
+                //accept our new block
+                std.log.info("Accepting own block", .{});
+                try accept_block(our_block, server);
+            }
+
+            // Setup our_block
+            // Update nonce and perhaps tx
+            dht.rng.random().bytes(&our_block.nonce);
+            our_block.time = t;
+            try setup_our_block(id_.ones());
+
+            // Get prehash
+            our_block.calculate_prehash();
+            const prehash = our_block.prehash;
+            const found = try persistent_merged_loaded.find(prehash);
+
+            // const found = try indexed_plot.find(bud);
+            const dist = dht.id.xor(found.bud, prehash);
+
+            if (std.mem.order(u8, &dist, &closest_dist) == .lt) {
+                // std.log.info("I:{} have chain hash: {} diff:{}, our diff:{}", .{ hex(server.id[0..8]), hex(chain_head.hash[0..8]), chain_head.total_difficulty, our_block.total_difficulty });
+                our_block.seed = found.seed;
+                our_block.bud = found.bud;
+
+                closest_dist = dist;
+                try setup_our_block(found.seed);
+                // std.log.info("\r[{}] persistent search:dist:{} {} got:{}", .{
+                //     i,
+                //     hex(&closest_dist),
+                //     hex(&our_block.prehash),
+                //     hex(&found.bud),
+                // });
+
+                // const difficulty = distance_to_difficulty(closest_dist);
+                // const embargo = 40.0 / difficulty;
+
+                // std.log.info("difficulty:{} embargo:{}", .{ difficulty, embargo });
+            }
+
+            i += 1;
         }
-
-        // Setup our_block
-        // Update nonce and perhaps tx
-        dht.rng.random().bytes(&our_block.nonce);
-        our_block.time = t;
-        try setup_our_block(id_.ones());
-
-        // Get prehash
-        our_block.calculate_prehash();
-        const prehash = our_block.prehash;
-        const found = try persistent_merged_loaded.find(prehash);
-
-        // const found = try indexed_plot.find(bud);
-        const dist = dht.id.xor(found.bud, prehash);
-
-        if (std.mem.order(u8, &dist, &closest_dist) == .lt) {
-            // std.log.info("I:{} have chain hash: {} diff:{}, our diff:{}", .{ hex(server.id[0..8]), hex(chain_head.hash[0..8]), chain_head.total_difficulty, our_block.total_difficulty });
-            our_block.seed = found.seed;
-            our_block.bud = found.bud;
-
-            closest_dist = dist;
-            try setup_our_block(found.seed);
-            // std.log.info("\r[{}] persistent search:dist:{} {} got:{}", .{
-            //     i,
-            //     hex(&closest_dist),
-            //     hex(&our_block.prehash),
-            //     hex(&found.bud),
-            // });
-
-            // const difficulty = distance_to_difficulty(closest_dist);
-            // const embargo = 40.0 / difficulty;
-
-            // std.log.info("difficulty:{} embargo:{}", .{ difficulty, embargo });
-        }
-
-        i += 1;
     }
 
     try server.wait();
