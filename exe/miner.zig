@@ -176,6 +176,9 @@ fn direct_message_hook(buf: []const u8, src_id: dht.ID, src_address: net.Address
 }
 
 fn setup_our_block(seed: dht.ID) !void {
+    accept_mutex.lock();
+    defer accept_mutex.unlock();
+
     our_block.prev = chain_head.hash;
     our_block.seed = seed;
     // our_block.tx =
@@ -212,9 +215,10 @@ fn accept_block(new_block: Block, server: *dht.Server) !void {
         while (block_db.get(cur_hash)) |block| {
             if (id_.is_zero(cur_hash))
                 break;
-            std.log.info("bid:{} t:{} dt:{} hash:{}  diff:{} parent:{}", .{
+            std.log.info("bid:{} t:{} emb:{}, dt:{} hash:{}  diff:{} parent:{}", .{
                 block.height,
                 block.time,
+                block.total_embargo,
                 prev_t - block.total_embargo,
                 hex(cur_hash[0..8]),
                 block.total_difficulty,
