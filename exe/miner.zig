@@ -79,7 +79,7 @@ const Block = struct {
 const Api = union(enum) {
     block: Block,
     req: bool,
-    rep: bool,
+    rep: []const u8,
     req_block: Hash,
     msg: []const u8,
 };
@@ -111,13 +111,13 @@ fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address, server:
             }
         },
         .req => {
-            const msg = Api{ .rep = true };
+            const msg = Api{ .rep = try std.fmt.allocPrint(allocator, "my head {} diff: {}", .{ hex(chain_head.hash[0..8]), chain_head.total_difficulty }) };
             const send_buf = try dht.serial.serialise_alloc(msg, allocator);
             // defer allocator.free(msg);
             try server.queue_broadcast(send_buf);
         },
-        .rep => {
-            std.log.info("Got Rep from: {}", .{hex(src_id[0..8])});
+        .rep => |rep| {
+            std.log.info("Got Rep from: {} {s}", .{ hex(src_id[0..8]), rep });
         },
         else => {},
     }
@@ -152,7 +152,7 @@ fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address, server:
 fn direct_message_hook(buf: []const u8, src_id: dht.ID, src_address: net.Address, server: *dht.Server) !void {
     // const t = time.time();
 
-    std.log.info("Got direct message: {} {} {}", .{ dht.hex(buf), dht.hex(&src_id), src_address });
+    std.log.info("Got direct message from:{} {}", .{ dht.hex(src_id[0..8]), src_address });
     _ = src_address;
     // _ = src_id;
     const message = try dht.serial.deserialise_slice(Api, buf, allocator);
