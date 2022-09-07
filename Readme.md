@@ -1,2 +1,2 @@
-Proof of Space algorithm
+# Proof of Space Search with Logarithmic Embargo (PoSS-LE)
 

@@ -14,6 +14,8 @@ const Hash = dht.Hash;
 
 pub const log_level: std.log.Level = .info;
 
+const allocator = std.heap.page_allocator;
+
 fn distance_to_difficulty(dist: ID) f64 {
     const log_value = pos.math.log2(dist);
     return 256.0 - log_value;
@@ -51,8 +53,8 @@ const Block = struct {
     pub fn calculate_hash(block: *Block) void {
         block.hash = pos.plot.hash_fast_mul(&.{
             &block.prehash,
-            &block.seed,
-            &block.bud, //the proof
+            &block.seed, //the proof
+            &block.bud,
             std.mem.asBytes(&block.difficulty),
             std.mem.asBytes(&block.total_difficulty),
             std.mem.asBytes(&block.embargo),
@@ -69,6 +71,8 @@ const Block = struct {
         block.difficulty = distance_to_difficulty(dist);
         // std.log.info("diff: {}, {}", .{ hex(&dist), block.difficulty });
         block.embargo = @floatToInt(i64, 100.0 / block.difficulty * 1000.0);
+        block.total_difficulty = chain_head.total_difficulty + block.difficulty;
+        block.total_embargo = chain_head.total_embargo + block.embargo;
     }
 };
 
@@ -77,6 +81,7 @@ const Api = union(enum) {
     req: bool,
     rep: bool,
     req_block: Hash,
+    msg: []const u8,
 };
 
 var block_db = std.AutoHashMap(Hash, Block).init(std.heap.page_allocator);
@@ -85,8 +90,6 @@ var our_block = Block{};
 var closest_dist = dht.id.ones();
 
 fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address, server: *dht.Server) !void {
-    const allocator = std.heap.page_allocator;
-
     _ = src_address;
     // _ = src_id;
     // std.log.info("Got broadcast: src:{} addr:{}", .{ hex(&src_id), src_address });
@@ -104,7 +107,7 @@ fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address, server:
 
                 try accept_block(block, server);
             } else {
-                std.log.info("not accepting block {}: other:{} mine:{}", .{ hex(&block.hash), block.total_difficulty, chain_head.total_difficulty });
+                std.log.info("not accepting block {}: from {}, other diff:{} mine diff:{}", .{ hex(block.hash[0..8]), hex(src_id[0..8]), block.total_difficulty, chain_head.total_difficulty });
             }
         },
         .req => {
@@ -150,8 +153,6 @@ fn direct_message_hook(buf: []const u8, src_id: dht.ID, src_address: net.Address
     // const t = time.time();
 
     std.log.info("Got direct message: {} {} {}", .{ dht.hex(buf), dht.hex(&src_id), src_address });
-    const allocator = std.heap.page_allocator;
-
     _ = src_address;
     // _ = src_id;
     const message = try dht.serial.deserialise_slice(Api, buf, allocator);
@@ -168,6 +169,9 @@ fn direct_message_hook(buf: []const u8, src_id: dht.ID, src_address: net.Address
             } else {
                 std.log.info("Dropping req block for hash: {}", .{hex(hash[0..8])});
             }
+        },
+        .msg => |msg| {
+            std.log.info("{}: {s}", .{ hex(src_id[0..8]), msg });
         },
         else => {
             std.log.info("Not block", .{});
@@ -189,17 +193,12 @@ fn setup_our_block(seed: dht.ID) !void {
 
     our_block.calculate_prehash();
     our_block.calculate_embargo();
-    // std.log.info("chain total diff{} + our diff{}", .{ chain_head.total_difficulty, our_block.difficulty });
-    our_block.total_difficulty = chain_head.total_difficulty + our_block.difficulty;
-    our_block.total_embargo = chain_head.total_embargo + our_block.embargo;
-
     our_block.calculate_hash();
 }
 
 var accept_mutex = std.Thread.Mutex{};
 
 fn accept_block(new_block: Block, server: *dht.Server) !void {
-    const allocator = std.heap.page_allocator;
     std.log.info("accepting block hash: {}, embargo: {}, curtime: {}", .{ hex(&new_block.hash), new_block.total_embargo, time.milliTimestamp() });
     accept_mutex.lock();
     defer accept_mutex.unlock();
@@ -249,8 +248,6 @@ fn accept_block(new_block: Block, server: *dht.Server) !void {
 pub fn read_and_send(server: *dht.Server) !void {
     _ = server;
     nosuspend {
-        const allocator = std.heap.page_allocator;
-
         var stdin = std.io.getStdIn();
         stdin.intended_io_mode = .blocking;
         var stdout = std.io.getStdOut();
@@ -279,9 +276,33 @@ pub fn read_and_send(server: *dht.Server) !void {
     }
 }
 
-pub fn main() anyerror!void {
-    const allocator = std.heap.page_allocator;
+fn send_block_if_embargo(t: i64, server: *dht.Server) !void {
+    if (t > our_block.total_embargo) { //time to send block
+        try debug_msg(try std.fmt.allocPrint(allocator, "sending own block: bid:{} emb:{} diff:{}", .{
+            hex(our_block.hash[0..8]),
+            our_block.total_embargo,
+            our_block.total_difficulty,
+        }), server);
+        std.log.info("embargo passed, sending time: {}, embargo: {}", .{ t, our_block.total_embargo });
 
+        const msg = Api{ .block = our_block };
+        const buf = try dht.serial.serialise_alloc(msg, allocator);
+        // defer allocator.free(msg);
+        try server.queue_broadcast(buf);
+
+        //accept our new block
+        std.log.info("Accepting own block", .{});
+        try accept_block(our_block, server);
+    }
+}
+
+fn debug_msg(buf: []const u8, server: *dht.Server) !void {
+    const msg = Api{ .msg = buf };
+    const send_buf = try dht.serial.serialise_alloc(msg, allocator);
+    try server.queue_direct_message(dht.id.zeroes(), send_buf);
+}
+
+pub fn main() anyerror!void {
     // Setup Chain block
     chain_head.time = time.milliTimestamp();
     chain_head.total_embargo = time.milliTimestamp();
@@ -300,7 +321,7 @@ pub fn main() anyerror!void {
         db_path: ?[]const u8 = null,
         public: bool = false,
         req_thread: bool = false,
-        enable_mining: bool = true,
+        zero_id: bool = false,
     }, std.heap.page_allocator, .print);
     if (options.options.ip == null or options.options.port == null) {
         std.log.warn("Ip not defined", .{});
@@ -309,7 +330,10 @@ pub fn main() anyerror!void {
     try dht.init();
 
     const address = try std.net.Address.parseIp(options.options.ip.?, options.options.port.?);
-    const id = dht.id.rand_id();
+    var id = dht.id.rand_id();
+    if (options.options.zero_id)
+        id = dht.id.zeroes();
+
     var server = try dht.server.Server.init(address, id, .{ .public = options.options.public });
     defer server.deinit();
 
@@ -332,13 +356,12 @@ pub fn main() anyerror!void {
 
     try server.start();
 
-    if (options.options.enable_mining) {
+    if (!options.options.zero_id) {
         // Setup Mining
-        const alloc = std.heap.page_allocator;
-        const persistent_merged_loaded = try pos.plot.PersistentPlot.init(alloc, options.options.plot_path);
+        const persistent_merged_loaded = try pos.plot.PersistentPlot.init(allocator, options.options.plot_path);
 
         const mem_bytes = 1024 * 1024; //1mb
-        const indexed_plot = try pos.plot.IndexedPersistentPlot.init(alloc, persistent_merged_loaded, mem_bytes);
+        const indexed_plot = try pos.plot.IndexedPersistentPlot.init(allocator, persistent_merged_loaded, mem_bytes);
 
         std.log.info("{}", .{persistent_merged_loaded.size});
         std.log.info("block size:{} #:{}", .{ indexed_plot.block_size, indexed_plot.index_size });
@@ -348,24 +371,13 @@ pub fn main() anyerror!void {
 
         while (true) {
             const t = time.milliTimestamp();
-            if (t > our_block.total_embargo) { //time to send block
-                std.log.info("embargo passed, sending time: {}, embargo: {}", .{ t, our_block.total_embargo });
-
-                const msg = Api{ .block = our_block };
-                const buf = try dht.serial.serialise_alloc(msg, allocator);
-                // defer allocator.free(msg);
-                try server.queue_broadcast(buf);
-
-                //accept our new block
-                std.log.info("Accepting own block", .{});
-                try accept_block(our_block, server);
-            }
+            try send_block_if_embargo(t, server);
 
             // Setup our_block
             // Update nonce and perhaps tx
             dht.rng.random().bytes(&our_block.nonce);
             our_block.time = t;
-            try setup_our_block(id_.ones());
+            // try setup_our_block(id_.ones());
 
             // Get prehash
             our_block.calculate_prehash();
@@ -376,12 +388,14 @@ pub fn main() anyerror!void {
             const dist = dht.id.xor(found.bud, prehash);
 
             if (std.mem.order(u8, &dist, &closest_dist) == .lt) {
+                closest_dist = dist;
                 // std.log.info("I:{} have chain hash: {} diff:{}, our diff:{}", .{ hex(server.id[0..8]), hex(chain_head.hash[0..8]), chain_head.total_difficulty, our_block.total_difficulty });
                 our_block.seed = found.seed;
                 our_block.bud = found.bud;
 
-                closest_dist = dist;
-                try setup_our_block(found.seed);
+                our_block.calculate_embargo();
+                our_block.calculate_hash();
+
                 // std.log.info("\r[{}] persistent search:dist:{} {} got:{}", .{
                 //     i,
                 //     hex(&closest_dist),
