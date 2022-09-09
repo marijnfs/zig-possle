@@ -49,6 +49,18 @@ const Block = struct {
     target_difficulty: f64 = 2,
     embargo_128: i64 = 0,
 
+    pub fn recompute(block: *Block, parent: *Block) void {
+        block.calculate_prehash();
+        block.calculate_bud();
+        block.calculate_embargo(parent);
+        block.calculate_hash();
+    }
+
+    pub fn set_parent(block: *Block, parent: *Block) void {
+        block.prev = parent.hash;
+        block.height = parent.height + 1;
+    }
+
     pub fn calculate_prehash(block: *Block) void {
         const prehash = pos.plot.hash_fast_mul(&.{
             &block.prev,
@@ -76,23 +88,24 @@ const Block = struct {
         block.bud = try pos.plot.hash_slow(&block.seed);
     }
 
-    pub fn calculate_embargo(block: *Block) void {
+    pub fn calculate_embargo(block: *Block, parent: *Block) void {
         const dist = dht.id.xor(block.prehash, block.bud);
         block.difficulty = distance_to_difficulty(dist);
         // std.log.info("diff: {}, {}", .{ hex(&dist), block.difficulty });
         block.embargo = @floatToInt(i64, block.target_difficulty / block.difficulty * miner_settings.target_embargo);
-        block.embargo_128 += block.embargo;
-        if (block.height > 0 and block.height % 128 == 0) {
+        block.embargo_128 = parent.embargo_128 + block.embargo;
+        const N = 128;
+        if (block.height > 0 and block.height % N == 0) {
             std.log.info("{} {} {}", .{
                 block.target_difficulty,
                 block.embargo_128,
-                std.math.log2(miner_settings.target_embargo / (@intToFloat(f64, block.embargo_128) / 128)),
+                std.math.log2(miner_settings.target_embargo / (@intToFloat(f64, block.embargo_128) / N)),
             });
-            block.target_difficulty = block.target_difficulty + std.math.log2(miner_settings.target_embargo / (@intToFloat(f64, block.embargo_128) / 4));
+            block.target_difficulty = block.target_difficulty + std.math.log2(miner_settings.target_embargo / (@intToFloat(f64, block.embargo_128) / N));
             block.embargo_128 = 0;
         }
-        block.total_difficulty = chain_head.total_difficulty + block.difficulty;
-        block.total_embargo = chain_head.total_embargo + block.embargo;
+        block.total_difficulty = parent.total_difficulty + block.difficulty;
+        block.total_embargo = parent.total_embargo + block.embargo;
     }
 };
 
@@ -111,11 +124,6 @@ var closest_dist = dht.id.ones();
 
 fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address, server: *dht.Server) !bool {
     _ = src_address;
-    // _ = src_id;
-    // std.log.info("Got broadcast: src:{} addr:{}", .{ hex(&src_id), src_address });
-
-    // const t = time.milliTimestamp();
-    // std.log.info("time: {}", .{t});
     const message = try dht.serial.deserialise_slice(Api, buf, allocator);
 
     // Verify the block
@@ -145,32 +153,6 @@ fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address, server:
         else => {},
     }
     return true;
-    // std.log.info("tx:{}", .{hex(&block.tx)});
-
-    // std.log.info("new chain head block.height: {}", .{block.height});
-
-    // Todo: Create copy and recalculate parameters to verify
-    // _ = block.calculate_prehash();
-    // block.calculate_embargo();
-
-    //origin block
-    // var prev_height: f64 = chain_head.height;
-    // var prev_time: i64 = chain_head.time;
-
-    // if (!std.mem.eql(u8, &block.prev, &std.mem.zeroes(Hash))) {
-    //     if (block_db.get(block.prev)) |chain_head| {
-    //         prev_height = chain_head.height;
-    //         prev_time = chain_head.time;
-    //     } else {
-    //         std.log.debug("Block refused, can't find prev block", .{});
-    //     }
-    // }
-
-    // calculate the relative height of the block
-    // const new_height = prev_height + 1;
-    // std.log.info("height {} t:{}", .{ new_height, t });
-    // std.log.info("difficulty: {}", .{new_difficulty});
-
 }
 
 fn direct_message_hook(buf: []const u8, src_id: dht.ID, src_address: net.Address, server: *dht.Server) !bool {
@@ -214,15 +196,13 @@ fn setup_our_block(seed: dht.ID) !void {
     setup_mutex.lock();
     defer setup_mutex.unlock();
 
-    our_block.prev = chain_head.hash;
     our_block.seed = seed;
+    our_block.set_parent(&chain_head);
     // our_block.tx =
     try our_block.calculate_bud();
-    our_block.height = chain_head.height + 1;
-    our_block.embargo_128 = chain_head.embargo_128;
 
     our_block.calculate_prehash();
-    our_block.calculate_embargo();
+    our_block.calculate_embargo(&chain_head);
     our_block.calculate_hash();
 }
 
@@ -246,11 +226,12 @@ fn accept_block(new_block: Block, server: *dht.Server) !void {
         while (block_db.get(cur_hash)) |block| {
             if (id_.is_zero(cur_hash))
                 break;
-            std.log.info("bid:{} tx:{} t:{} emb:{}, dt:{} hash:{}  diff:{} parent:{}", .{
+            std.log.info("bid:{} tx:{} t:{} emb:{}, target:{} dt:{} hash:{}  diff:{} parent:{}", .{
                 block.height,
                 block.tx[0],
                 block.time,
                 block.total_embargo,
+                block.target_difficulty,
                 prev_t - block.total_embargo,
                 hex(cur_hash[0..8]),
                 block.total_difficulty,
@@ -413,7 +394,6 @@ pub fn main() anyerror!void {
             // Update nonce and perhaps tx
             dht.rng.random().bytes(&our_block.nonce);
             our_block.time = t;
-            // try setup_our_block(id_.ones());
 
             // Get prehash
             our_block.calculate_prehash();
@@ -425,25 +405,12 @@ pub fn main() anyerror!void {
 
             if (std.mem.order(u8, &dist, &closest_dist) == .lt) {
                 closest_dist = dist;
-                // std.log.info("I:{} have chain hash: {} diff:{}, our diff:{}", .{ hex(server.id[0..8]), hex(chain_head.hash[0..8]), chain_head.total_difficulty, our_block.total_difficulty });
+
                 our_block.seed = found.seed;
                 our_block.bud = found.bud;
 
-                our_block.embargo_128 = chain_head.embargo_128;
-                our_block.calculate_embargo();
+                our_block.calculate_embargo(&chain_head);
                 our_block.calculate_hash();
-
-                // std.log.info("\r[{}] persistent search:dist:{} {} got:{}", .{
-                //     i,
-                //     hex(&closest_dist),
-                //     hex(&our_block.prehash),
-                //     hex(&found.bud),
-                // });
-
-                // const difficulty = distance_to_difficulty(closest_dist);
-                // const embargo = 40.0 / difficulty;
-
-                // std.log.info("difficulty:{} embargo:{}", .{ difficulty, embargo });
             }
 
             i += 1;
