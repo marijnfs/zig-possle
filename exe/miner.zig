@@ -89,7 +89,7 @@ var chain_head = Block{};
 var our_block = Block{};
 var closest_dist = dht.id.ones();
 
-fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address, server: *dht.Server) !void {
+fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address, server: *dht.Server) !bool {
     _ = src_address;
     // _ = src_id;
     // std.log.info("Got broadcast: src:{} addr:{}", .{ hex(&src_id), src_address });
@@ -114,13 +114,16 @@ fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address, server:
             const msg = Api{ .rep = try std.fmt.allocPrint(allocator, "my head {} diff: {}", .{ hex(chain_head.hash[0..8]), chain_head.total_difficulty }) };
             const send_buf = try dht.serial.serialise_alloc(msg, allocator);
             // defer allocator.free(msg);
-            try server.queue_broadcast(send_buf);
+            // try server.queue_broadcast(send_buf);
+            try server.queue_direct_message(src_id, send_buf);
+            std.log.info("I {} got req, broadcasting now", .{hex(server.id[0..8])});
         },
         .rep => |rep| {
             std.log.info("Got Rep from: {} {s}", .{ hex(src_id[0..8]), rep });
         },
         else => {},
     }
+    return true;
     // std.log.info("tx:{}", .{hex(&block.tx)});
 
     // std.log.info("new chain head block.height: {}", .{block.height});
@@ -149,10 +152,10 @@ fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address, server:
 
 }
 
-fn direct_message_hook(buf: []const u8, src_id: dht.ID, src_address: net.Address, server: *dht.Server) !void {
+fn direct_message_hook(buf: []const u8, src_id: dht.ID, src_address: net.Address, server: *dht.Server) !bool {
     // const t = time.time();
 
-    std.log.info("Got direct message from:{} {}", .{ dht.hex(src_id[0..8]), src_address });
+    // std.log.info("Got direct message from:{} {}", .{ dht.hex(src_id[0..8]), src_address });
     _ = src_address;
     // _ = src_id;
     const message = try dht.serial.deserialise_slice(Api, buf, allocator);
@@ -173,10 +176,15 @@ fn direct_message_hook(buf: []const u8, src_id: dht.ID, src_address: net.Address
         .msg => |msg| {
             std.log.info("{}: {s}", .{ hex(src_id[0..8]), msg });
         },
+        .rep => |rep| {
+            std.log.info("Got Rep from: {} {s}", .{ hex(src_id[0..8]), rep });
+        },
+
         else => {
             std.log.info("Not block", .{});
         },
     }
+    return true;
 }
 
 var setup_mutex = std.Thread.Mutex{};
