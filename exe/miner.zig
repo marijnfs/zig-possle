@@ -19,6 +19,7 @@ const allocator = std.heap.page_allocator;
 const MinerSettings = struct {
     accept_delay: i64 = 500,
     send_delay: i64 = 500,
+    target_embargo: f64 = 5000,
 };
 var miner_settings = MinerSettings{};
 
@@ -34,7 +35,7 @@ const Block = struct {
     tx: ID = dht.id.zeroes(),
     nonce: ID = dht.id.zeroes(),
     time: i64 = 0,
-    height: f64 = 0,
+    height: u64 = 0,
 
     seed: ID = dht.id.zeroes(), //the proof
     bud: ID = dht.id.zeroes(), //the proof
@@ -44,6 +45,9 @@ const Block = struct {
     prehash: ID = dht.id.zeroes(),
     embargo: i64 = 0,
     total_embargo: i64 = 0,
+
+    target_difficulty: f64 = 2,
+    embargo_128: i64 = 0,
 
     pub fn calculate_prehash(block: *Block) void {
         const prehash = pos.plot.hash_fast_mul(&.{
@@ -76,7 +80,17 @@ const Block = struct {
         const dist = dht.id.xor(block.prehash, block.bud);
         block.difficulty = distance_to_difficulty(dist);
         // std.log.info("diff: {}, {}", .{ hex(&dist), block.difficulty });
-        block.embargo = @floatToInt(i64, 100.0 / block.difficulty * 1000.0);
+        block.embargo = @floatToInt(i64, block.target_difficulty / block.difficulty * miner_settings.target_embargo);
+        block.embargo_128 += block.embargo;
+        if (block.height > 0 and block.height % 128 == 0) {
+            std.log.info("{} {} {}", .{
+                block.target_difficulty,
+                block.embargo_128,
+                std.math.log2(miner_settings.target_embargo / (@intToFloat(f64, block.embargo_128) / 128)),
+            });
+            block.target_difficulty = block.target_difficulty + std.math.log2(miner_settings.target_embargo / (@intToFloat(f64, block.embargo_128) / 4));
+            block.embargo_128 = 0;
+        }
         block.total_difficulty = chain_head.total_difficulty + block.difficulty;
         block.total_embargo = chain_head.total_embargo + block.embargo;
     }
@@ -205,6 +219,7 @@ fn setup_our_block(seed: dht.ID) !void {
     // our_block.tx =
     try our_block.calculate_bud();
     our_block.height = chain_head.height + 1;
+    our_block.embargo_128 = chain_head.embargo_128;
 
     our_block.calculate_prehash();
     our_block.calculate_embargo();
@@ -414,6 +429,7 @@ pub fn main() anyerror!void {
                 our_block.seed = found.seed;
                 our_block.bud = found.bud;
 
+                our_block.embargo_128 = chain_head.embargo_128;
                 our_block.calculate_embargo();
                 our_block.calculate_hash();
 
