@@ -16,6 +16,12 @@ pub const log_level: std.log.Level = .info;
 
 const allocator = std.heap.page_allocator;
 
+const MinerSettings = struct {
+    accept_delay: i64 = 500,
+    send_delay: i64 = 500,
+};
+var miner_settings = MinerSettings{};
+
 fn distance_to_difficulty(dist: ID) f64 {
     const log_value = pos.math.log2(dist);
     return 256.0 - log_value;
@@ -101,7 +107,8 @@ fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address, server:
     // Verify the block
     switch (message) {
         .block => |block| {
-            if (block.total_difficulty > chain_head.total_difficulty) {
+            const t = time.milliTimestamp();
+            if (t - miner_settings.accept_delay > block.total_embargo and block.total_difficulty > chain_head.total_difficulty) {
                 std.log.info("Accepting received block", .{});
                 std.log.info("block total difficulty: {}, chain head: {}", .{ block.total_difficulty, chain_head.total_difficulty });
 
@@ -224,8 +231,9 @@ fn accept_block(new_block: Block, server: *dht.Server) !void {
         while (block_db.get(cur_hash)) |block| {
             if (id_.is_zero(cur_hash))
                 break;
-            std.log.info("bid:{} t:{} emb:{}, dt:{} hash:{}  diff:{} parent:{}", .{
+            std.log.info("bid:{} tx:{} t:{} emb:{}, dt:{} hash:{}  diff:{} parent:{}", .{
                 block.height,
+                block.tx[0],
                 block.time,
                 block.total_embargo,
                 prev_t - block.total_embargo,
@@ -285,7 +293,7 @@ pub fn read_and_send(server: *dht.Server) !void {
 }
 
 fn send_block_if_embargo(t: i64, server: *dht.Server) !void {
-    if (t > our_block.total_embargo) { //time to send block
+    if (t - miner_settings.send_delay > our_block.total_embargo) { //time to send block
         try debug_msg(try std.fmt.allocPrint(allocator, "sending own block: bid:{} emb:{} diff:{}", .{
             hex(our_block.hash[0..8]),
             our_block.total_embargo,
@@ -316,7 +324,7 @@ pub fn main() anyerror!void {
     chain_head.total_embargo = time.milliTimestamp();
 
     // Setup Our block
-    dht.rng.random().bytes(&our_block.tx); //our 'vote'
+    // dht.rng.random().bytes(&our_block.tx); //our 'vote'
     try setup_our_block(id_.ones());
 
     // Setup server
@@ -330,13 +338,18 @@ pub fn main() anyerror!void {
         public: bool = false,
         req_thread: bool = false,
         zero_id: bool = false,
+        exp: i64 = 0,
     }, std.heap.page_allocator, .print);
     if (options.options.ip == null or options.options.port == null) {
         std.log.warn("Ip not defined", .{});
         return;
     }
-    try dht.init();
+    if (options.options.exp == 1) {
+        miner_settings = .{ .accept_delay = 1500, .send_delay = 1500 };
+        our_block.tx[0] = 1;
+    }
 
+    try dht.init();
     const address = try std.net.Address.parseIp(options.options.ip.?, options.options.port.?);
     var id = dht.id.rand_id();
     if (options.options.zero_id)
