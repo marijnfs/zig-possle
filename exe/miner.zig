@@ -49,14 +49,14 @@ const Block = struct {
     target_difficulty: f64 = 2,
     embargo_128: i64 = 0,
 
-    pub fn recompute(block: *Block, parent: *Block) void {
+    pub fn recompute(block: *Block, parent: *const Block) !void {
         block.calculate_prehash();
-        block.calculate_bud();
+        try block.calculate_bud();
         block.calculate_embargo(parent);
         block.calculate_hash();
     }
 
-    pub fn set_parent(block: *Block, parent: *Block) void {
+    pub fn set_parent(block: *Block, parent: *const Block) void {
         block.prev = parent.hash;
         block.height = parent.height + 1;
     }
@@ -88,7 +88,7 @@ const Block = struct {
         block.bud = try pos.plot.hash_slow(&block.seed);
     }
 
-    pub fn calculate_embargo(block: *Block, parent: *Block) void {
+    pub fn calculate_embargo(block: *Block, parent: *const Block) void {
         const dist = dht.id.xor(block.prehash, block.bud);
         block.difficulty = distance_to_difficulty(dist);
         // std.log.info("diff: {}, {}", .{ hex(&dist), block.difficulty });
@@ -133,6 +133,17 @@ fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address, server:
             if (t - miner_settings.accept_delay > block.total_embargo and block.total_difficulty > chain_head.total_difficulty) {
                 std.log.info("Accepting received block", .{});
                 std.log.info("block total difficulty: {}, chain head: {}", .{ block.total_difficulty, chain_head.total_difficulty });
+
+                if (block_db.get(block.prev)) |head| {
+                    var block_copy = block;
+                    try block_copy.recompute(&head);
+                    if (!std.mem.eql(u8, std.mem.asBytes(&block), std.mem.asBytes(&block_copy))) {
+                        std.log.info("Block rebuild failed, rejecting", .{});
+                        return false;
+                    }
+                } else {
+                    std.log.info("Don't have head, accepting blindly", .{}); //TODO: replace with proper syncing method
+                }
 
                 try accept_block(block, server);
             } else {
