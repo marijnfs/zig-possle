@@ -50,6 +50,7 @@ const Block = struct {
     embargo_128: i64 = 0,
 
     pub fn recompute(block: *Block, parent: *const Block) !void {
+        block.set_parent(parent);
         block.calculate_prehash();
         try block.calculate_bud();
         block.calculate_embargo(parent);
@@ -91,6 +92,8 @@ const Block = struct {
     pub fn calculate_embargo(block: *Block, parent: *const Block) void {
         const dist = dht.id.xor(block.prehash, block.bud);
         block.difficulty = distance_to_difficulty(dist);
+        block.target_difficulty = parent.target_difficulty;
+
         // std.log.info("diff: {}, {}", .{ hex(&dist), block.difficulty });
         block.embargo = @floatToInt(i64, block.target_difficulty / block.difficulty * miner_settings.target_embargo);
         block.embargo_128 = parent.embargo_128 + block.embargo;
@@ -101,10 +104,11 @@ const Block = struct {
                 block.embargo_128,
                 std.math.log2(miner_settings.target_embargo / (@intToFloat(f64, block.embargo_128) / N)),
             });
+            // Difficulty Adjustment code
             block.target_difficulty = block.target_difficulty + std.math.log2(miner_settings.target_embargo / (@intToFloat(f64, block.embargo_128) / N));
             block.embargo_128 = 0;
         }
-        block.total_difficulty = parent.total_difficulty + block.difficulty;
+        block.total_difficulty = parent.total_difficulty + std.math.exp2(block.difficulty); //Total difficulty is kept track of in linear space
         block.total_embargo = parent.total_embargo + block.embargo;
     }
 };
