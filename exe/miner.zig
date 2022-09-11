@@ -99,6 +99,7 @@ const Block = struct {
     pub fn calculate_embargo(block: *Block, parent: *const Block) void {
         const dist = dht.id.xor(block.prehash, block.bud);
         block.difficulty = distance_to_difficulty(dist);
+        std.log.info("dif: {} {} {} {} {}", .{ block.difficulty, hex(block.prehash[0..8]), hex(block.bud[0..8]), hex(block.nonce[0..8]), hex(dist[0..8]) });
         block.target_difficulty = parent.target_difficulty;
 
         // std.log.info("diff: {}, {}", .{ hex(&dist), block.difficulty });
@@ -153,8 +154,6 @@ fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address, server:
                     if (!std.mem.eql(u8, std.mem.asBytes(&block), std.mem.asBytes(&block_copy))) {
                         std.log.info("Block rebuild failed, rejecting \n{} \n{}", .{ block, block_copy });
                         return error.FalseRebuild;
-                    } else {
-                        std.log.info("Successfull rebuild", .{});
                     }
                 } else {
                     std.log.info("Don't have head, accepting blindly", .{}); //TODO: replace with proper syncing method
@@ -168,8 +167,7 @@ fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address, server:
         .req => {
             const msg = Api{ .rep = try std.fmt.allocPrint(allocator, "my head {} diff: {}", .{ hex(chain_head.hash[0..8]), chain_head.total_difficulty }) };
             const send_buf = try dht.serial.serialise_alloc(msg, allocator);
-            // defer allocator.free(msg);
-            // try server.queue_broadcast(send_buf);
+
             try server.queue_direct_message(src_id, send_buf);
             std.log.info("I {} got req, broadcasting now", .{hex(server.id[0..8])});
         },
@@ -215,24 +213,6 @@ fn direct_message_hook(buf: []const u8, src_id: dht.ID, src_address: net.Address
     }
     return true;
 }
-
-var setup_mutex = std.Thread.Mutex{};
-
-// fn setup_block(seed: dht.ID) !void {
-//     // setup_mutex.lock();
-//     // defer setup_mutex.unlock();
-
-//     var block = Block{};
-
-//     block.seed = seed;
-//     block.set_parent(&chain_head);
-//     // block.tx =
-//     try block.calculate_bud();
-
-//     block.calculate_prehash();
-//     block.calculate_embargo(&chain_head);
-//     block.calculate_hash();
-// }
 
 var accept_mutex = std.Thread.Mutex{};
 
@@ -311,7 +291,6 @@ pub fn read_and_send(server: *dht.Server) !void {
             try server.finger_table.summarize(stdout.writer());
             try stdout.writeAll("public fingers:\n");
             try server.public_finger_table.summarize(stdout.writer());
-            // }
         }
     }
 }
@@ -344,8 +323,6 @@ fn send_block_if_embargo(t: i64, server: *dht.Server) !void {
                 if (!std.mem.eql(u8, std.mem.asBytes(&our_best_block), std.mem.asBytes(&block_copy))) {
                     std.log.info("Self Block rebuild failed, rejecting \n{} \n{}", .{ our_best_block, block_copy });
                     return error.FalseRebuild;
-                } else {
-                    std.log.info("Self Block rebuild succeeded\n{} \n{}", .{ our_best_block, block_copy });
                 }
             } else {
                 if (!id_.is_zero(block_copy.prev))
@@ -364,11 +341,7 @@ fn debug_msg(buf: []const u8, server: *dht.Server) !void {
 
 pub fn main() anyerror!void {
     // Setup Chain block
-    // chain_head.time = time.milliTimestamp();
     chain_head.total_embargo = time.milliTimestamp();
-
-    // Setup Our block
-    // dht.rng.random().bytes(&our_block.tx); //our 'vote'
 
     // Setup server
     const options = try args.parseForCurrentProcess(struct {
@@ -439,14 +412,12 @@ pub fn main() anyerror!void {
             const t = time.milliTimestamp();
             try send_block_if_embargo(t, server);
 
+            // Setup our_block
+            // Update nonce and perhaps tx
             var mining_block = Block{};
             var nonce: ID = undefined;
             dht.rng.random().bytes(&nonce);
             try mining_block.setup_mining_block(&chain_head, tx, nonce);
-
-            // Setup our_block
-            // Update nonce and perhaps tx
-            // our_block.time = t;
 
             // Get prehash
             const prehash = mining_block.prehash;
