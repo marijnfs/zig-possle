@@ -99,21 +99,22 @@ const Block = struct {
     pub fn calculate_embargo(block: *Block, parent: *const Block) void {
         const dist = dht.id.xor(block.prehash, block.bud);
         block.difficulty = distance_to_difficulty(dist);
-        std.log.info("dif: {} {} {} {} {}", .{ block.difficulty, hex(block.prehash[0..8]), hex(block.bud[0..8]), hex(block.nonce[0..8]), hex(dist[0..8]) });
+        // std.log.info("dif: {} {} {} {} {}", .{ block.difficulty, hex(block.prehash[0..8]), hex(block.bud[0..8]), hex(block.nonce[0..8]), hex(dist[0..8]) });
         block.target_difficulty = parent.target_difficulty;
 
         // std.log.info("diff: {}, {}", .{ hex(&dist), block.difficulty });
         block.embargo = @floatToInt(i64, block.target_difficulty / block.difficulty * miner_settings.target_embargo);
         block.embargo_128 = parent.embargo_128 + block.embargo;
-        const N = 128;
+        const N = 16;
         if (block.height > 0 and block.height % N == 0) {
-            std.log.info("{} {} {}", .{
-                block.target_difficulty,
-                block.embargo_128,
-                std.math.log2(miner_settings.target_embargo / (@intToFloat(f64, block.embargo_128) / N)),
-            });
+            // std.log.info("{} {} {}", .{
+            //     block.target_difficulty,
+            //     block.embargo_128,
+            //     std.math.log2(miner_settings.target_embargo / (@intToFloat(f64, block.embargo_128) / N)),
+            // });
             // Difficulty Adjustment code
-            block.target_difficulty = block.target_difficulty + std.math.log2(miner_settings.target_embargo / (@intToFloat(f64, block.embargo_128) / N));
+            // block.target_difficulty = block.target_difficulty + std.math.log2(miner_settings.target_embargo / (@intToFloat(f64, block.embargo_128) / N));
+            block.target_difficulty *= miner_settings.target_embargo / (@intToFloat(f64, block.embargo_128) / N);
             block.embargo_128 = 0;
         }
         block.total_difficulty = parent.total_difficulty + std.math.exp2(block.difficulty); //Total difficulty is kept track of in linear space
