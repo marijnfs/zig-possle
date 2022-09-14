@@ -49,14 +49,14 @@ const Block = struct {
     target_difficulty: f64 = 2,
     embargo_128: i64 = 0,
 
-    pub fn setup_mining_block(block: *Block, parent: *const Block, tx: ID, nonce: ID) !void {
+    pub fn setup_mining_block(block: *Block, parent: Block, tx: ID, nonce: ID) !void {
         block.tx = tx;
         block.nonce = nonce;
         block.set_parent(parent);
         block.calculate_prehash();
     }
 
-    pub fn rebuild(block: *Block, parent: *const Block) !void {
+    pub fn rebuild(block: *Block, parent: Block) !void {
         block.set_parent(parent);
         block.calculate_prehash();
         try block.calculate_bud();
@@ -64,7 +64,7 @@ const Block = struct {
         block.calculate_hash();
     }
 
-    pub fn set_parent(block: *Block, parent: *const Block) void {
+    pub fn set_parent(block: *Block, parent: Block) void {
         block.prev = parent.hash;
         block.height = parent.height + 1;
     }
@@ -96,7 +96,7 @@ const Block = struct {
         block.bud = try pos.plot.hash_slow(&block.seed);
     }
 
-    pub fn calculate_embargo(block: *Block, parent: *const Block) void {
+    pub fn calculate_embargo(block: *Block, parent: Block) void {
         const dist = dht.id.xor(block.prehash, block.bud);
         block.difficulty = distance_to_difficulty(dist);
         // std.log.info("dif: {} {} {} {} {}", .{ block.difficulty, hex(block.prehash[0..8]), hex(block.bud[0..8]), hex(block.nonce[0..8]), hex(dist[0..8]) });
@@ -136,6 +136,7 @@ var our_best_block = Block{};
 var closest_dist = dht.id.ones();
 
 var best_block_mutex = std.Thread.Mutex{};
+var chain_head_mutex = std.Thread.Mutex{};
 
 fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address, server: *dht.Server) !bool {
     _ = src_address;
@@ -151,7 +152,7 @@ fn broadcast_hook(buf: []const u8, src_id: ID, src_address: net.Address, server:
 
                 if (block_db.get(block.prev)) |head| {
                     var block_copy = block;
-                    try block_copy.rebuild(&head);
+                    try block_copy.rebuild(head);
                     if (!std.mem.eql(u8, std.mem.asBytes(&block), std.mem.asBytes(&block_copy))) {
                         std.log.info("Block rebuild failed, rejecting \n{} \n{}", .{ block, block_copy });
                         return error.FalseRebuild;
@@ -260,7 +261,11 @@ fn accept_block(new_block: Block, server: *dht.Server) !void {
         }
     }
 
-    chain_head = new_block;
+    {
+        chain_head_mutex.lock();
+        defer chain_head_mutex.unlock();
+        chain_head = new_block;
+    }
     closest_dist = dht.id.ones(); //reset closest
 
     our_best_block = Block{};
@@ -319,15 +324,17 @@ fn send_block_if_embargo(t: i64, server: *dht.Server) !void {
         {
             var block_copy = our_best_block;
 
-            if (block_db.get(block_copy.prev)) |head| {
-                try block_copy.rebuild(&head);
-                if (!std.mem.eql(u8, std.mem.asBytes(&our_best_block), std.mem.asBytes(&block_copy))) {
-                    std.log.info("Self Block rebuild failed, rejecting \n{} \n{}", .{ our_best_block, block_copy });
-                    return error.FalseRebuild;
+            if (!id_.is_zero(block_copy.hash)) {
+                if (block_db.get(block_copy.prev)) |head| {
+                    try block_copy.rebuild(head);
+                    if (!std.mem.eql(u8, std.mem.asBytes(&our_best_block), std.mem.asBytes(&block_copy))) {
+                        std.log.info("Self Block rebuild failed, rejecting \n{} \n{}", .{ our_best_block, block_copy });
+                        return error.FalseRebuild;
+                    }
+                } else {
+                    if (!id_.is_zero(block_copy.prev))
+                        return error.PrevNotInDb;
                 }
-            } else {
-                if (!id_.is_zero(block_copy.prev))
-                    return error.PrevNotInDb;
             }
         }
         try accept_block(our_best_block, server);
@@ -400,11 +407,10 @@ pub fn main() anyerror!void {
         // Setup Mining
         const persistent_merged_loaded = try pos.plot.PersistentPlot.init(allocator, options.options.plot_path);
 
-        const mem_bytes = 1024 * 1024; //1mb
-        const indexed_plot = try pos.plot.IndexedPersistentPlot.init(allocator, persistent_merged_loaded, mem_bytes);
+        const indexed_plot = try pos.plot.IndexedPersistentPlot.init(allocator, persistent_merged_loaded);
 
         std.log.info("{}", .{persistent_merged_loaded.size});
-        std.log.info("block size:{} #:{}", .{ indexed_plot.block_size, indexed_plot.index_size });
+        std.log.info("trie size:{}", .{indexed_plot.trie.items.len});
 
         std.log.info("Start mining", .{});
         var i: usize = 0;
@@ -418,7 +424,11 @@ pub fn main() anyerror!void {
             var mining_block = Block{};
             var nonce: ID = undefined;
             dht.rng.random().bytes(&nonce);
-            try mining_block.setup_mining_block(&chain_head, tx, nonce);
+
+            chain_head_mutex.lock();
+            defer chain_head_mutex.unlock();
+
+            try mining_block.setup_mining_block(chain_head, tx, nonce);
 
             // Get prehash
             const prehash = mining_block.prehash;
@@ -433,7 +443,7 @@ pub fn main() anyerror!void {
                 mining_block.seed = found.seed;
                 mining_block.bud = found.bud;
 
-                mining_block.calculate_embargo(&chain_head);
+                mining_block.calculate_embargo(chain_head);
                 mining_block.calculate_hash();
                 best_block_mutex.lock();
                 defer best_block_mutex.unlock();
