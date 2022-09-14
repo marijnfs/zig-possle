@@ -358,10 +358,9 @@ pub const PersistentPlot = struct {
         while (l != r) {
             // std.log.info("l:{} r:{}", .{ l, r });
             // what is our search bit on position 'bit'?
-            var byte: usize = bit / 8;
-            var bit_index: u3 = @intCast(u3, 7 - bit % 8); //bit index is reversed, 0 bit will be at 7'th pos in a byte (little endian)
-            var mask: u8 = 1;
-            mask <<= bit_index;
+            const byte: usize = bit / 8;
+            const bit_index: u3 = @intCast(u3, 7 - bit % 8); //bit index is reversed, 0 bit will be at 7'th pos in a byte (little endian)
+            const mask: u8 = @intCast(u8, 1) << bit_index;
             const search_bit = bud[byte] & mask > 0;
 
             // find the first bit that is true in our search range
@@ -394,8 +393,7 @@ pub const PersistentPlot = struct {
         while (l != r) {
             const m = l + (r - l) / 2;
             const plant = try plot.get_plant(m);
-            var mask: u8 = 1;
-            mask <<= bit_index;
+            const mask: u8 = @intCast(u8, 1) << bit_index;
             const bit_on = plant.bud[byte] & mask > 0;
 
             if (bit_on) {
@@ -457,64 +455,94 @@ pub const PersistentPlot = struct {
 };
 
 // Indexed plot
-// Keeps a memory index evenly spaced
-// So we can first search in memory and only then persistent memory
-// n_blocks * block_size >= size of underlying persistent plot
+// Create Trie
 pub const IndexedPersistentPlot = struct {
     persistent: *PersistentPlot,
-    bud_index: std.ArrayList(dht.Hash), //evenly spread out buds
-    index_size: usize, //number of blocks
-    block_size: usize, //block size per bud
+    trie: std.ArrayList(Node), //trie data structure
 
-    pub fn init(alloc: std.mem.Allocator, persistent: *PersistentPlot, byte_size: usize) !*IndexedPersistentPlot {
+    const Node = struct {
+        l: i32 = 0, //negative if node index, positive if plot index
+        r: i32 = 0,
+    };
+
+    pub fn init(alloc: std.mem.Allocator, persistent: *PersistentPlot) !*IndexedPersistentPlot {
         if (persistent.size == 0)
             return error.NoItems;
         var plot = try alloc.create(IndexedPersistentPlot);
-
-        const index_size = (byte_size + @sizeOf(dht.Hash) - 1) / @sizeOf(dht.Hash);
-        const block_size = (persistent.size - 1) / index_size;
-
         plot.* = .{
             .persistent = persistent,
-            .bud_index = std.ArrayList(dht.Hash).init(alloc), //evenly spread out buds
-            .index_size = index_size, //number of blocks
-            .block_size = block_size, //block size per bud
+            .trie = std.ArrayList(Node).init(alloc),
         };
-        // std.log.info("{}", .{plot.*});
 
-        try plot.setup_table();
+        try plot.setup_table(alloc);
 
         return plot;
     }
 
-    pub fn setup_table(plot: *IndexedPersistentPlot) !void {
+    // pub fn find(plot: *Plot, bud: dht.Hash) !Plant {
+
+    // }
+
+    pub fn setup_table(plot: *IndexedPersistentPlot, alloc: std.mem.Allocator) !void {
         std.log.info("Building table", .{});
-        try plot.bud_index.ensureTotalCapacity(plot.index_size);
-        var i: usize = 0;
-        while (i < plot.index_size) : (i += 1) {
-            const index = (i + 1) * plot.block_size;
-            const plant = try plot.persistent.get_plant(index);
-            try plot.bud_index.append(plant.bud);
-        }
-        std.sort.sort(dht.Hash, plot.bud_index.items, {}, less_hash);
+
+        const IndexNode = struct {
+            bit: usize,
+            l: usize,
+            r: usize,
+            parent_ref: ?*i32,
+        };
+
+        // reserve space for trie
+        // this also ensures reference points don't move which are used during the build of the trie
+        try plot.trie.ensureTotalCapacity(plot.persistent.size);
+
         std.log.info("Done building table", .{});
-    }
 
-    fn less_hash(_: void, a: dht.Hash, b: dht.Hash) bool {
-        return order_hash({}, a, b) == .lt;
-    }
+        // Setup stack
+        var stack = std.ArrayList(IndexNode).init(alloc);
+        try stack.append(.{ .bit = 0, .l = 0, .r = plot.persistent.size, .parent_ref = null });
 
-    fn order_hash(_: void, a: dht.Hash, b: dht.Hash) std.math.Order {
-        return std.mem.order(u8, &a, &b);
-    }
+        while (stack.popOrNull()) |index_node| {
+            const l = index_node.l;
+            const r = index_node.r;
+            const bit = index_node.bit;
+            const parent_ref = index_node.parent_ref;
 
-    pub fn find(plot: *IndexedPersistentPlot, bud: dht.Hash) !Plant {
-        const idx = binarySearch(dht.Hash, bud, plot.bud_index.items, {}, order_hash);
-        // std.log.info("bin idx:{} size: {}, n: {}, bsize: {}", .{ idx, plot.persistent.size, plot.index_size, plot.block_size });
-        const l = idx * plot.block_size;
-        const r = std.math.min((idx + 1) * plot.block_size, plot.persistent.size - 1);
+            const idx = try plot.persistent.find_lr_bit(l, r, bit);
 
-        return plot.persistent.find_lr(bud, l, r);
+            if (idx % 10000 == 0)
+                std.log.info("stack: {}", .{index_node});
+
+            const new_node = Node{};
+            try plot.trie.append(new_node);
+            const node_idx = plot.trie.items.len - 1;
+            var node = plot.trie.items[node_idx]; //wish there was a last() function
+
+            // It is a stack, so the last pushed gets popped first
+            // We deal with the right case first, since we want to push the left last
+            // This way we build the stack from low to high
+
+            if (idx == r) {
+                node.r = 0; //right now we use index 0 to indicate null. The very first node is 0 and is loaded first in any case and never pointed to, so we don't need this index anyway
+            } else if (idx + 1 == r) {
+                node.r = -@intCast(i32, idx); // add a leaf
+            } else {
+                try stack.append(.{ .bit = bit + 1, .l = idx, .r = r, .parent_ref = &node.r });
+            }
+
+            if (parent_ref) |ref| {
+                ref.* = @intCast(i32, node_idx);
+            }
+
+            if (l == idx) {
+                node.l = 0; //right now we use index 0 to indicate null. The very first node is 0 and is loaded first in any case and never pointed to, so we don't need this index anyway
+            } else if (l + 1 == idx) {
+                node.l = -@intCast(i32, l); // add a leaf
+            } else {
+                try stack.append(.{ .bit = bit + 1, .l = l, .r = idx, .parent_ref = &node.l });
+            }
+        }
     }
 };
 
