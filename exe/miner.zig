@@ -432,9 +432,9 @@ pub fn main() anyerror!void {
 
             // Get prehash
             const prehash = mining_block.prehash;
-            const found = try persistent_merged_loaded.find(prehash);
+            // const found = try persistent_merged_loaded.find(prehash);
+            const found = try indexed_plot.find(prehash);
 
-            // const found = try indexed_plot.find(bud);
             const dist = dht.id.xor(prehash, found.bud);
 
             if (std.mem.order(u8, &dist, &closest_dist) == .lt) {

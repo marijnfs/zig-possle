@@ -479,9 +479,38 @@ pub const IndexedPersistentPlot = struct {
         return plot;
     }
 
-    // pub fn find(plot: *Plot, bud: dht.Hash) !Plant {
+    pub fn find(plot: *IndexedPersistentPlot, bud: dht.Hash) !Plant {
+        var bit: usize = 0;
+        var node_idx: i32 = 0;
 
-    // }
+        while (true) {
+            if (node_idx < 0) { //A plot index
+                return try plot.persistent.get_plant(@intCast(usize, -node_idx));
+            }
+            const byte: usize = bit / 8;
+            const bit_index: u3 = @intCast(u3, 7 - bit % 8); //bit index is reversed, 0 bit will be at 7'th pos in a byte (little endian)
+            const mask: u8 = @intCast(u8, 1) << bit_index;
+            const search_bit = bud[byte] & mask > 0;
+
+            const node = plot.trie.items[@intCast(usize, node_idx)];
+
+            if (node.l == 0 and node.r == 0) {
+                return error.CorruptedNode;
+            }
+
+            if (node.l == 0) {
+                node_idx = node.r;
+            } else if (node.r == 0) {
+                node_idx = node.l;
+            } else if (search_bit) {
+                node_idx = node.r;
+            } else {
+                node_idx = node.l;
+            }
+
+            bit += 1;
+        }
+    }
 
     pub fn setup_table(plot: *IndexedPersistentPlot, alloc: std.mem.Allocator) !void {
         std.log.info("Building table", .{});
@@ -490,7 +519,10 @@ pub const IndexedPersistentPlot = struct {
             bit: usize,
             l: usize,
             r: usize,
-            parent_ref: ?*i32,
+            parent_ref: ?struct {
+                idx: usize,
+                right: bool,
+            },
         };
 
         // reserve space for trie
@@ -517,7 +549,7 @@ pub const IndexedPersistentPlot = struct {
             const new_node = Node{};
             try plot.trie.append(new_node);
             const node_idx = plot.trie.items.len - 1;
-            var node = plot.trie.items[node_idx]; //wish there was a last() function
+            var node = &plot.trie.items[node_idx]; //wish there was a last() function
 
             // It is a stack, so the last pushed gets popped first
             // We deal with the right case first, since we want to push the left last
@@ -528,11 +560,7 @@ pub const IndexedPersistentPlot = struct {
             } else if (idx + 1 == r) {
                 node.r = -@intCast(i32, idx); // add a leaf
             } else {
-                try stack.append(.{ .bit = bit + 1, .l = idx, .r = r, .parent_ref = &node.r });
-            }
-
-            if (parent_ref) |ref| {
-                ref.* = @intCast(i32, node_idx);
+                try stack.append(.{ .bit = bit + 1, .l = idx, .r = r, .parent_ref = .{ .idx = node_idx, .right = true } });
             }
 
             if (l == idx) {
@@ -540,7 +568,15 @@ pub const IndexedPersistentPlot = struct {
             } else if (l + 1 == idx) {
                 node.l = -@intCast(i32, l); // add a leaf
             } else {
-                try stack.append(.{ .bit = bit + 1, .l = l, .r = idx, .parent_ref = &node.l });
+                try stack.append(.{ .bit = bit + 1, .l = l, .r = idx, .parent_ref = .{ .idx = node_idx, .right = false } });
+            }
+
+            if (parent_ref) |ref| {
+                if (ref.right) {
+                    plot.trie.items[ref.idx].r = @intCast(i32, node_idx);
+                } else {
+                    plot.trie.items[ref.idx].l = @intCast(i32, node_idx);
+                }
             }
         }
     }
