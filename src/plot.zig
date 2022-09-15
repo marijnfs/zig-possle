@@ -519,7 +519,7 @@ pub const IndexedPersistentPlot = struct {
             bit: usize,
             l: usize,
             r: usize,
-            parent_ref: ?struct {
+            parent_ref: struct { //Optional didn't work here
                 idx: usize,
                 right: bool,
             },
@@ -533,9 +533,10 @@ pub const IndexedPersistentPlot = struct {
 
         // Setup stack
         var stack = std.ArrayList(IndexNode).init(alloc);
-        try stack.append(.{ .bit = 0, .l = 0, .r = plot.persistent.size, .parent_ref = null });
+        defer stack.deinit();
+        try stack.append(.{ .bit = 0, .l = 0, .r = plot.persistent.size, .parent_ref = .{ .idx = 0, .right = false } }); //for now parent_ref optional doesn't work so for the first node we use idx=0; should be fine it will get overwritten anyway after that
 
-        while (stack.popOrNull()) |index_node| {
+        while (stack.popOrNull()) |*index_node| {
             const l = index_node.l;
             const r = index_node.r;
             const bit = index_node.bit;
@@ -570,14 +571,14 @@ pub const IndexedPersistentPlot = struct {
             } else {
                 try stack.append(.{ .bit = bit + 1, .l = l, .r = idx, .parent_ref = .{ .idx = node_idx, .right = false } });
             }
-
-            if (parent_ref) |ref| {
-                if (ref.right) {
-                    plot.trie.items[ref.idx].r = @intCast(i32, node_idx);
-                } else {
-                    plot.trie.items[ref.idx].l = @intCast(i32, node_idx);
-                }
+            // const ref = parent_ref;
+            // if (index_node.parent_ref) |ref| {
+            if (parent_ref.right) {
+                plot.trie.items[parent_ref.idx].r = @intCast(i32, node_idx);
+            } else {
+                plot.trie.items[parent_ref.idx].l = @intCast(i32, node_idx);
             }
+            // }
         }
     }
 };

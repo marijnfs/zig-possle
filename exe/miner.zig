@@ -236,7 +236,7 @@ fn accept_block(new_block: Block, server: *dht.Server) !void {
         while (block_db.get(cur_hash)) |block| {
             if (id_.is_zero(cur_hash))
                 break;
-            std.log.info("bid:{} tx:{} emb:{}, target:{} dt:{} hash:{}  diff:{} parent:{}", .{
+            std.log.info("bid:{} tx:{} emb:{}, target:{} dt:{} hash:{} bud:{} pre:{} diff:{} parent:{}", .{
                 block.height,
                 block.tx[0],
                 // block.time,
@@ -244,7 +244,9 @@ fn accept_block(new_block: Block, server: *dht.Server) !void {
                 block.target_difficulty,
                 prev_t - block.total_embargo,
                 hex(cur_hash[0..8]),
-                block.total_difficulty,
+                hex(block.bud[0..8]),
+                hex(block.prehash[0..8]),
+                block.difficulty,
                 hex(block.prev[0..8]),
             });
             cur_hash = block.prev;
@@ -272,7 +274,6 @@ fn accept_block(new_block: Block, server: *dht.Server) !void {
 }
 
 pub fn read_and_send(server: *dht.Server) !void {
-    _ = server;
     nosuspend {
         var stdin = std.io.getStdIn();
         stdin.intended_io_mode = .blocking;
