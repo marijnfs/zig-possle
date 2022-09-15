@@ -480,12 +480,17 @@ pub const IndexedPersistentPlot = struct {
     }
 
     pub fn find(plot: *IndexedPersistentPlot, bud: dht.Hash) !Plant {
+        const index = try plot.find_index(bud);
+        return try plot.persistent.get_plant(index);
+    }
+
+    pub fn find_index(plot: *IndexedPersistentPlot, bud: dht.Hash) !usize {
         var bit: usize = 0;
         var node_idx: i32 = 0;
 
         while (true) {
             if (node_idx < 0) { //A plot index
-                return try plot.persistent.get_plant(@intCast(usize, -node_idx));
+                return @intCast(usize, -node_idx);
             }
             const byte: usize = bit / 8;
             const bit_index: u3 = @intCast(u3, 7 - bit % 8); //bit index is reversed, 0 bit will be at 7'th pos in a byte (little endian)
