@@ -1,0 +1,8 @@
+from persistent with 128M 100000 per sec
+index generation, 1mil per sec (log(N) access or about 20/30)
+from mem directly, 30 mil per sec?
+
+300 times
+
+300 * 128gb? 38TB
+
