@@ -14,7 +14,7 @@ const allocator = std.heap.page_allocator;
 
 fn test_ssd_retrieval() !void {
     const plot_path = "main.db";
-    const persistent_merged_loaded = try pos.plot.PersistentPlot.init(allocator, plot_path);
+    const persistent_plot = try pos.plot.PersistentPlot.init(allocator, plot_path);
 
     var i: usize = 0;
     while (true) {
@@ -22,27 +22,29 @@ fn test_ssd_retrieval() !void {
             std.log.info("n found: {}", .{i});
         }
 
-        const idx = dht.rng.random.intRangeLessThan(usize, persistent_merged_loaded.size);
-        _ = persistent_merged_loaded.get_plant(idx);
+        const idx = dht.rng.random.intRangeLessThan(usize, persistent_plot.size);
+        _ = persistent_plot.get_plant(idx);
     }
 }
 
 fn test_mem_retrieval() !void {
-    // const plot_path = "main.db";
-    // const persistent_merged_loaded = try pos.plot.PersistentPlot.init(allocator, plot_path);
-
+    const plot_path = "main.db";
+    const persistent_plot = try pos.plot.PersistentPlot.init(allocator, plot_path);
+    const plot = persistent_plot.to_memory();
     var i: usize = 0;
     while (true) {
         if (i % 100000 == 0) {
             std.log.info("n found: {}", .{i});
         }
+        const idx = dht.rng.random.intRangeLessThan(usize, plot.size);
+        _ = plot.get_plant(idx);
     }
 }
 
 fn test_index_retrieval() !void {
     const plot_path = "main.db";
-    const persistent_merged_loaded = try pos.plot.PersistentPlot.init(allocator, plot_path);
-    const indexed_plot = try pos.plot.IndexedPersistentPlot.init(allocator, persistent_merged_loaded);
+    const persistent_plot = try pos.plot.PersistentPlot.init(allocator, plot_path);
+    const indexed_plot = try pos.plot.IndexedPersistentPlot.init(allocator, persistent_plot);
 
     var i: usize = 0;
     while (true) {

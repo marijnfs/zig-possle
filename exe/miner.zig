@@ -416,11 +416,11 @@ pub fn main() anyerror!void {
 
     if (!options.options.zero_id) {
         // Setup Mining
-        const persistent_merged_loaded = try pos.plot.PersistentPlot.init(allocator, options.options.plot_path);
+        const persistent_plot = try pos.plot.PersistentPlot.init(allocator, options.options.plot_path);
 
-        const indexed_plot = try pos.plot.IndexedPersistentPlot.init(allocator, persistent_merged_loaded);
+        const indexed_plot = try pos.plot.IndexedPersistentPlot.init(allocator, persistent_plot);
 
-        std.log.info("{}", .{persistent_merged_loaded.size});
+        std.log.info("{}", .{persistent_plot.size});
         std.log.info("trie size:{}", .{indexed_plot.trie.items.len});
 
         std.log.info("Start mining", .{});
@@ -451,7 +451,7 @@ pub fn main() anyerror!void {
 
             // Get prehash
             const prehash = mining_block.prehash;
-            // const found = try persistent_merged_loaded.find(prehash);
+            // const found = try persistent_plot.find(prehash);
             const found = try indexed_plot.find(prehash);
 
             const dist = dht.id.xor(prehash, found.bud);
