@@ -19,7 +19,7 @@ pub fn build(b: *std.build.Builder) void {
 
     const args_pkg = std.build.Pkg{
         .name = "yazap",
-        .source = .{ .path = "ext/yazap/src/main.zig" },
+        .source = .{ .path = "ext/yazap/src/lib.zig" },
     };
     const zigargs_pkg = std.build.Pkg{
         .name = "zig-args",

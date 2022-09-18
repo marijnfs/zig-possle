@@ -416,21 +416,6 @@ pub fn main() anyerror!void {
         std.log.info("Start mining", .{});
         var i: usize = 0;
 
-        // while (true) {
-        //     if (i % 100000 == 0) {
-        //         std.log.info("n found: {}", .{i});
-        //     }
-        //     var mining_block = Block{};
-        //     var nonce: ID = undefined;
-        //     dht.rng.random().bytes(&nonce);
-        //     try mining_block.setup_mining_block(chain_head, tx, nonce);
-
-        //     // Get prehash
-        //     const prehash = mining_block.prehash;
-        //     _ = try indexed_plot.find_index(prehash);
-        //     i += 1;
-        // }
-
         while (true) {
             const t = time.milliTimestamp();
             try send_block_if_embargo(t, server);
