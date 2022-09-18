@@ -2,45 +2,107 @@ pub const io_mode = .evented; // use event loop
 
 const std = @import("std");
 const dht = @import("dht");
-const args = @import("args");
+const yazap = @import("yazap");
 
 const pos = @import("pos");
 const plot = pos.plot;
 
 const hex = pos.hex;
+const Command = yazap.Command;
+const flag = yazap.flag;
 
 pub const log_level: std.log.Level = .info;
-const allocator = std.heap.page_allocator;
+// const allocator = std.heap.page_allocator;
+var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};
+const allocator = gpa.allocator();
+
+fn read_size(str: []const u8) !usize {
+    if (str.len == 0)
+        return 0;
+    if (str[str.len - 1] == 'K' or str[str.len - 1] == 'k') {
+        return 1024 * try std.fmt.parseInt(usize, str[0 .. str.len - 1], 10);
+    }
+    if (str[str.len - 1] == 'M' or str[str.len - 1] == 'm') {
+        return 1024 * 1024 * try std.fmt.parseInt(usize, str[0 .. str.len - 1], 10);
+    }
+    if (str[str.len - 1] == 'G' or str[str.len - 1] == 'g') {
+        return 1024 * 1024 * 1024 * try std.fmt.parseInt(usize, str[0 .. str.len - 1], 10);
+    }
+    return try std.fmt.parseInt(usize, str[0 .. str.len - 1], 10);
+}
 
 pub fn main() anyerror!void {
     try dht.init();
-
+    defer _ = gpa.deinit();
     // Setup server
-    const options = try args.parseForCurrentProcess(struct {
-        out: []const u8,
-        tmp: []const u8,
-        plot_bytesize: usize,
-        persistent_base_bytesize: usize,
-        // base_bytesize: usize = 1024 * 1024,
-        base_bytesize: usize = 1024,
+    var mine = Command.new(allocator, "mine");
+    defer mine.deinit();
+    try mine.addArg(flag.argOne("size", null));
+    try mine.addArg(flag.argOne("persistent_basesize", null));
+    try mine.addArg(flag.argOne("basesize", null));
+    try mine.addArg(flag.argOne("out", null));
+    try mine.addArg(flag.argOne("n_threads", null));
+    try mine.addArg(flag.argOne("tmp", null));
 
-        n_threads: usize = 4,
-    }, allocator, .print);
+    var mine_args = try mine.parseProcess();
+    defer mine_args.deinit();
+
+    // const options = try args.parseForCurrentProcess(struct {
+    //     out: []const u8,
+    //     tmp: []const u8,
+    //     plot_bytesize: usize,
+    //     persistent_base_bytesize: usize,
+    //     // base_bytesize: usize = 1024 * 1024,
+    //     base_bytesize: usize = 1024,
+
+    //     n_threads: usize = 4,
+    // }, allocator, .print);
 
     // Plotting
-    const N = options.options.plot_bytesize / 64; //64 bytes per entry
 
-    std.log.info("{} bytes means {} buds need to be calculated", .{ options.options.plot_bytesize, N });
+    var plot_bytesize: usize = 4 << 30;
+    if (mine_args.valueOf("size")) |size| {
+        plot_bytesize = try read_size(size);
+    }
+    const N = plot_bytesize / 64;
+
+    std.log.info("{} bytes means {} buds need to be calculated", .{ plot_bytesize, N });
 
     var t2 = try std.time.Timer.start();
-    const base_N = options.options.base_bytesize / 64;
-    var merge_plotter = try plot.MergePlotter.init(allocator, options.options.persistent_base_bytesize / 64, base_N);
 
-    const n_threads = options.options.n_threads;
+    var persistent_base_bytesize: usize = 1 << 30;
+    if (mine_args.valueOf("persistent_basesize")) |basesize| {
+        persistent_base_bytesize = try read_size(basesize);
+    }
+    const persistent_size = persistent_base_bytesize / 64;
+
+    var base_bytesize: usize = 1 << 20;
+    if (mine_args.valueOf("basesize")) |basesize| {
+        base_bytesize = try read_size(basesize);
+    }
+    const basesize = base_bytesize / 64;
+
+    var merge_plotter = try plot.MergePlotter.init(allocator, persistent_size, basesize);
+
+    var n_threads: usize = 2;
+
+    if (mine_args.valueOf("n_threads")) |threads| {
+        n_threads = try std.fmt.parseInt(usize, threads, 10);
+    }
 
     var plot_list = std.ArrayList(*plot.PersistentPlot).init(allocator);
 
     var plot_counter: usize = 0;
+
+    var tmp: []const u8 = "/tmp";
+    if (mine_args.valueOf("tmp")) |tmp_path| {
+        tmp = tmp_path;
+    }
+
+    var output_path: []const u8 = "plot.data";
+    if (mine_args.valueOf("out")) |path| {
+        output_path = path;
+    }
 
     while (true) {
         if (plot_list.items.len == 1 and plot_list.items[0].size > N) {
@@ -48,7 +110,7 @@ pub fn main() anyerror!void {
             break;
         }
 
-        const plot_path = try std.fmt.allocPrint(allocator, "{s}/plot_{}", .{ options.options.tmp, plot_counter });
+        const plot_path = try std.fmt.allocPrint(allocator, "{s}/plot_{}", .{ tmp, plot_counter });
         plot_counter += 1;
         const persistent_plot = b: {
             std.log.info("Starting to plot", .{});
@@ -79,17 +141,7 @@ pub fn main() anyerror!void {
             if (last_plot.size != prelast_plot.size)
                 break;
 
-            const merge_plot_path = b: {
-                if (plot_list.items.len == 2 and plot_list.items[0].size + plot_list.items[1].size > N) {
-                    std.log.info("getting path {s}", .{options.options.out});
-                    // const final_path = try std.fs.cwd().realpathAlloc(allocator, options.options.out);
-                    // std.log.info("Merging final plot {s}", .{options.options.out});
-                    // break :b final_path;
-                    break :b options.options.out;
-                } else {
-                    break :b try std.fmt.allocPrint(allocator, "{s}/plot_{}", .{ options.options.tmp, plot_counter });
-                }
-            };
+            const merge_plot_path = try std.fmt.allocPrint(allocator, "{s}/plot_{}", .{ tmp, plot_counter });
 
             plot_counter += 1;
 

@@ -18,7 +18,11 @@ pub fn build(b: *std.build.Builder) void {
     };
 
     const args_pkg = std.build.Pkg{
-        .name = "args",
+        .name = "yazap",
+        .source = .{ .path = "ext/yazap/src/main.zig" },
+    };
+    const zigargs_pkg = std.build.Pkg{
+        .name = "zig-args",
         .source = .{ .path = "ext/zig-args/args.zig" },
     };
 
@@ -51,10 +55,20 @@ pub fn build(b: *std.build.Builder) void {
     miner.addPackage(dht_pkg);
     miner.addPackage(args_pkg);
     miner.addPackage(pos_pkg);
+    miner.addPackage(zigargs_pkg);
 
     const run_cmd_miner = miner.run();
     run_cmd_miner.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
         run_cmd_miner.addArgs(args);
     }
+
+    const speedtest = b.addExecutable("speedtest", "exe/speedtest.zig");
+    speedtest.setTarget(target);
+    speedtest.setBuildMode(mode);
+    speedtest.install();
+
+    speedtest.addPackage(dht_pkg);
+    speedtest.addPackage(args_pkg);
+    speedtest.addPackage(pos_pkg);
 }

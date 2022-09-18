@@ -2,7 +2,7 @@ pub const io_mode = .evented; // use event loop
 
 const std = @import("std");
 const dht = @import("dht");
-const args = @import("args");
+const args = @import("zig-args");
 const net = std.net;
 const time = std.time;
 const pos = @import("pos");

@@ -100,7 +100,9 @@ pub const Plot = struct {
     }
 
     pub fn deinit(plot: *Plot) void {
+        const alloc = plot.land.allocator;
         plot.land.deinit();
+        alloc.destroy(plot);
     }
 
     pub fn find(plot: *Plot, bud: dht.Hash) !Plant {
