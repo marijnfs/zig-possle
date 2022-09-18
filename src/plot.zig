@@ -264,9 +264,6 @@ pub const PersistentPlot = struct {
 
         var buffered_writer = std.io.bufferedWriter(plot.file.writer());
 
-        var arena_alloc = std.heap.ArenaAllocator.init(alloc);
-        defer arena_alloc.deinit();
-
         try dht.serial.serialise(Header{ .size = plot.size }, buffered_writer.writer());
 
         const header_a = try source_plot_a.read_header();
@@ -705,7 +702,7 @@ pub const MergePlotter = struct {
     }
 
     pub fn check_done(plotter: *MergePlotter) bool {
-        return plotter.plot_list.items.len >= 1 and plotter.plot_list.items[0].land.items.len >= plotter.final_size;
+        return plotter.plot_list.items.len >= 1 and plotter.plot_list.items[plotter.plot_list.items.len - 1].size >= plotter.final_size;
     }
 
     pub fn extract_plot(plotter: *MergePlotter) *Plot {

@@ -34,6 +34,9 @@ fn read_size(str: []const u8) !usize {
 pub fn main() anyerror!void {
     try dht.init();
     defer _ = gpa.deinit();
+
+    var string_arena = std.heap.ArenaAllocator.init(gpa.allocator());
+    defer string_arena.deinit();
     // Setup server
     var mine = Command.new(allocator, "mine");
     defer mine.deinit();
@@ -108,7 +111,7 @@ pub fn main() anyerror!void {
             break;
         }
 
-        const plot_path = try std.fmt.allocPrint(allocator, "{s}/plot_{}", .{ tmp, plot_counter });
+        const plot_path = try std.fmt.allocPrint(string_arena.allocator(), "{s}/plot_{}", .{ tmp, plot_counter });
         // defer allocator.free(plot_path);
 
         plot_counter += 1;
@@ -117,9 +120,10 @@ pub fn main() anyerror!void {
             var merge_plotter = try plot.MergePlotter.init(allocator, persistent_size, basesize);
             defer merge_plotter.deinit();
             const plot_a = try merge_plotter.plot_multithread_blocking(n_threads);
-            defer plot_a.deinit();
             std.log.info("Making Persistent", .{});
             const persistent_plot = try plot.PersistentPlot.initPlot(allocator, plot_path, plot_a);
+            plot_a.deinit();
+
             std.log.info("Done", .{});
 
             // try plot.check_consistency();
@@ -143,7 +147,7 @@ pub fn main() anyerror!void {
             if (last_plot.size != prelast_plot.size)
                 break;
 
-            const merge_plot_path = try std.fmt.allocPrint(allocator, "{s}/plot_{}", .{ tmp, plot_counter });
+            const merge_plot_path = try std.fmt.allocPrint(string_arena.allocator(), "{s}/plot_{}", .{ tmp, plot_counter });
             // defer allocator.free(merge_plot_path);
 
             plot_counter += 1;
