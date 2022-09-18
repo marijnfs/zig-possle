@@ -4,3 +4,6 @@
 [submodule "ext/zig-dht"]
 	path = ext/zig-dht
 	url = gitolite@vps9114.xlshosting.net:zig-dht
+[submodule "ext/yazap"]
+	path = ext/yazap
+	url = https://github.com/PrajwalCH/yazap.git
