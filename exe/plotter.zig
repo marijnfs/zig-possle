@@ -13,7 +13,7 @@ const flag = yazap.flag;
 
 pub const log_level: std.log.Level = .info;
 // const allocator = std.heap.page_allocator;
-var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};
+var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true, .stack_trace_frames = 12 }){};
 const allocator = gpa.allocator();
 
 fn read_size(str: []const u8) !usize {
@@ -82,8 +82,6 @@ pub fn main() anyerror!void {
     }
     const basesize = base_bytesize / 64;
 
-    var merge_plotter = try plot.MergePlotter.init(allocator, persistent_size, basesize);
-
     var n_threads: usize = 2;
 
     if (mine_args.valueOf("n_threads")) |threads| {
@@ -111,9 +109,13 @@ pub fn main() anyerror!void {
         }
 
         const plot_path = try std.fmt.allocPrint(allocator, "{s}/plot_{}", .{ tmp, plot_counter });
+        // defer allocator.free(plot_path);
+
         plot_counter += 1;
         const persistent_plot = b: {
             std.log.info("Starting to plot", .{});
+            var merge_plotter = try plot.MergePlotter.init(allocator, persistent_size, basesize);
+            defer merge_plotter.deinit();
             const plot_a = try merge_plotter.plot_multithread_blocking(n_threads);
             defer plot_a.deinit();
             std.log.info("Making Persistent", .{});
@@ -142,6 +144,7 @@ pub fn main() anyerror!void {
                 break;
 
             const merge_plot_path = try std.fmt.allocPrint(allocator, "{s}/plot_{}", .{ tmp, plot_counter });
+            // defer allocator.free(merge_plot_path);
 
             plot_counter += 1;
 
@@ -152,11 +155,11 @@ pub fn main() anyerror!void {
             {
                 std.log.info("Deleting  {s} {s}", .{ last_plot.path, prelast_plot.path });
 
-                last_plot.deinit();
-                prelast_plot.deinit();
-
                 try last_plot.delete_file();
                 try prelast_plot.delete_file();
+
+                last_plot.deinit();
+                prelast_plot.deinit();
             }
 
             try plot_list.resize(plot_list.items.len - 2);

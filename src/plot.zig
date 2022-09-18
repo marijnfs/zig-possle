@@ -57,7 +57,8 @@ pub fn hash_slow(key: []const u8) !dht.Hash {
         &hash,
         key,
         &salt,
-        .{ .t = 1, .m = 128, .p = 1, .secret = null, .ad = null }, // 60 days on ryzen 5950x?
+        .{ .t = 1, .m = 1, .p = 1, .secret = null, .ad = null }, // 60 days on ryzen 5950x?
+        // .{ .t = 1, .m = 128, .p = 1, .secret = null, .ad = null }, // 60 days on ryzen 5950x?
         // .{ .t = 2, .m = 512, .p = 1, .secret = null, .ad = null }, // 600 days on ryzen 5950x
         .argon2d,
     );
@@ -100,7 +101,7 @@ pub const Plot = struct {
     }
 
     pub fn deinit(plot: *Plot) void {
-        const alloc = plot.land.allocator;
+        const alloc = plot.land.allocator; //abuse the managed ArrayList to get allocator
         plot.land.deinit();
         alloc.destroy(plot);
     }
@@ -199,6 +200,7 @@ pub const PersistentPlot = struct {
     file: std.fs.File,
     size: usize = 0,
     path: []const u8 = "", //Opening path
+    alloc: std.mem.Allocator,
 
     const Header = struct {
         size: usize,
@@ -206,6 +208,7 @@ pub const PersistentPlot = struct {
 
     pub fn deinit(plot: *PersistentPlot) void {
         plot.file.close();
+        plot.alloc.destroy(plot);
     }
 
     pub fn init(alloc: std.mem.Allocator, path: []const u8) !*PersistentPlot {
@@ -214,6 +217,7 @@ pub const PersistentPlot = struct {
             .file = try std.fs.cwd().openFile(path, .{}),
             .size = 0,
             .path = path,
+            .alloc = alloc,
         };
 
         const header = try plot.read_header();
@@ -230,6 +234,7 @@ pub const PersistentPlot = struct {
             .file = try std.fs.cwd().createFile(path, .{ .read = true }),
             .size = source_plot.size,
             .path = path,
+            .alloc = alloc,
         };
 
         var buffered_writer = std.io.bufferedWriter(plot.file.writer());
@@ -254,6 +259,7 @@ pub const PersistentPlot = struct {
             .file = try std.fs.cwd().createFile(path, .{ .read = true }),
             .size = source_plot_a.size + source_plot_b.size,
             .path = path,
+            .alloc = alloc,
         };
 
         var buffered_writer = std.io.bufferedWriter(plot.file.writer());
@@ -266,7 +272,6 @@ pub const PersistentPlot = struct {
         const header_a = try source_plot_a.read_header();
         const header_b = try source_plot_b.read_header();
 
-        std.log.info("header_a: {}, header_b: {}", .{ header_a, header_b });
         if (header_a.size != source_plot_a.size or header_b.size != source_plot_b.size) {
             return error.InvalidHeader;
         }
@@ -621,6 +626,16 @@ pub const MergePlotter = struct {
         return plotter;
     }
 
+    pub fn deinit(plotter: *MergePlotter) void {
+        for (plotter.plot_list.items) |plot| {
+            plot.deinit();
+        }
+
+        const alloc = plotter.plot_list.allocator;
+        plotter.plot_list.deinit();
+        alloc.destroy(plotter);
+    }
+
     pub fn plot_multithread_blocking(plotter: *MergePlotter, n_threads: usize) !*Plot {
         var counter = std.atomic.Atomic(usize).init(0);
 
@@ -690,7 +705,7 @@ pub const MergePlotter = struct {
     }
 
     pub fn check_done(plotter: *MergePlotter) bool {
-        return plotter.plot_list.items.len == 1 and plotter.plot_list.items[0].land.items.len >= plotter.final_size;
+        return plotter.plot_list.items.len >= 1 and plotter.plot_list.items[0].land.items.len >= plotter.final_size;
     }
 
     pub fn extract_plot(plotter: *MergePlotter) *Plot {
