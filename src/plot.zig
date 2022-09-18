@@ -120,6 +120,9 @@ pub const Plot = struct {
         return plot.land.items[idx];
     }
 
+    pub fn get_plant(plot: *Plot, idx: usize) Plant {
+        return plot.land.items[idx];
+    }
     pub fn seed(plot: *Plot) !void {
         // var buf = try std.heap.page_allocator.alloc(u8, 1 * 1024 * 1024);
         // defer std.heap.page_allocator.free(buf);
@@ -406,6 +409,16 @@ pub const PersistentPlot = struct {
         }
 
         return l;
+    }
+
+    pub fn to_memory(plot: *PersistentPlot, alloc: std.mem.Allocator) !*Plot {
+        var memory_plot = try Plot.init(alloc, plot.size);
+        try plot.reset_to_plants();
+        var i: usize = 0;
+        while (i < plot.size) : (i += 1) {
+            memory_plot.land.items[i] = try plot.read_next_plant();
+        }
+        return memory_plot;
     }
 
     pub fn delete_file(plot: *PersistentPlot) !void {

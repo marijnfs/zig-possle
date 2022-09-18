@@ -20,6 +20,7 @@ const MinerSettings = struct {
     accept_delay: i64 = 500,
     send_delay: i64 = 500,
     target_embargo: f64 = 5000,
+    build_on_previous_head: bool = false, //build on the back before the current head. Only used for experiments.
 };
 var miner_settings = MinerSettings{};
 
@@ -371,9 +372,18 @@ pub fn main() anyerror!void {
         std.log.warn("Ip not defined", .{});
         return;
     }
+
+    // Strategies used for experiments
+    // We want to show these strategies are inferior
+    // Strat 1: early send and accept
     if (options.options.exp == 1) {
         miner_settings = .{ .accept_delay = 1500, .send_delay = 1500 };
         tx[0] = 1;
+    }
+    // Strat 2: Build on block before chain head in order to compare
+    if (options.options.exp == 2) {
+        miner_settings = .{ .build_on_previous_head = true };
+        tx[0] = 2;
     }
 
     try dht.init();
@@ -429,7 +439,15 @@ pub fn main() anyerror!void {
             chain_head_mutex.lock();
             defer chain_head_mutex.unlock();
 
-            try mining_block.setup_mining_block(chain_head, tx, nonce);
+            var prev_block = chain_head;
+
+            // Following is only used for experiments
+            if (miner_settings.build_on_previous_head) {
+                if (block_db.get(chain_head.prev)) |before_block| {
+                    prev_block = before_block;
+                }
+            }
+            try mining_block.setup_mining_block(prev_block, tx, nonce);
 
             // Get prehash
             const prehash = mining_block.prehash;
