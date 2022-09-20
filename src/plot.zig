@@ -485,6 +485,10 @@ pub const IndexedPersistentPlot = struct {
         r: i32 = 0,
     };
 
+    const Header = struct {
+        size: usize,
+    };
+
     pub fn init(alloc: std.mem.Allocator, persistent: *PersistentPlot) !*IndexedPersistentPlot {
         if (persistent.size == 0)
             return error.NoItems;
@@ -495,6 +499,20 @@ pub const IndexedPersistentPlot = struct {
         };
 
         try plot.setup_table(alloc);
+
+        return plot;
+    }
+
+    pub fn init_with_index(alloc: std.mem.Allocator, persistent: *PersistentPlot, index_path: []const u8) !*IndexedPersistentPlot {
+        if (persistent.size == 0)
+            return error.NoItems;
+        var plot = try alloc.create(IndexedPersistentPlot);
+        plot.* = .{
+            .persistent = persistent,
+            .trie = std.ArrayList(Node).init(alloc),
+        };
+
+        try plot.load_index(index_path);
 
         return plot;
     }
@@ -534,6 +552,38 @@ pub const IndexedPersistentPlot = struct {
             }
 
             bit += 1;
+        }
+    }
+
+    pub fn save_index(plot: *IndexedPersistentPlot, path: []const u8) !void {
+        var file = try std.fs.cwd().createFile(path, .{ .read = false });
+        defer file.close();
+        var buffered_writer = std.io.bufferedWriter(file.writer());
+        var writer = buffered_writer.writer();
+
+        try dht.serial.serialise(Header{ .size = plot.trie.items.len }, writer);
+
+        for (plot.trie.items) |node| {
+            try dht.serial.serialise(node, writer);
+        }
+        try buffered_writer.flush();
+    }
+
+    pub fn load_index(plot: *IndexedPersistentPlot, path: []const u8) !void {
+        plot.trie.clearAndFree();
+
+        var file = try std.fs.cwd().openFile(path, .{});
+        defer file.close();
+
+        var buffered_reader = std.io.bufferedReader(file.reader());
+        var reader = buffered_reader.reader();
+
+        const header = try dht.serial.deserialise(Header, reader, null);
+        try plot.trie.ensureTotalCapacity(header.size);
+
+        var n: usize = 0;
+        while (n < header.size) : (n += 1) {
+            try plot.trie.append(try dht.serial.deserialise(Node, reader, null));
         }
     }
 

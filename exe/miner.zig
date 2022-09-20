@@ -358,6 +358,7 @@ pub fn main() anyerror!void {
         ip: ?[]const u8,
         port: ?u16,
         plot_path: []const u8,
+        index_path: ?[]const u8,
         remote_ip: ?[]const u8 = null,
         remote_port: ?u16 = null,
         db_path: ?[]const u8 = null,
@@ -418,7 +419,16 @@ pub fn main() anyerror!void {
         // Setup Mining
         const persistent_plot = try pos.plot.PersistentPlot.init(allocator, options.options.plot_path);
 
-        const indexed_plot = try pos.plot.IndexedPersistentPlot.init(allocator, persistent_plot);
+        std.log.info("Loading indexed", .{});
+        const indexed_plot = b: {
+            if (options.options.index_path) |index_path| {
+                std.log.info("Loading indexed {s}", .{index_path});
+
+                break :b try pos.plot.IndexedPersistentPlot.init_with_index(allocator, persistent_plot, index_path);
+            } else {
+                break :b try pos.plot.IndexedPersistentPlot.init(allocator, persistent_plot);
+            }
+        };
 
         std.log.info("{}", .{persistent_plot.size});
         std.log.info("trie size:{}", .{indexed_plot.trie.items.len});

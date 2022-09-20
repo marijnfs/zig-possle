@@ -63,6 +63,22 @@ pub fn build(b: *std.build.Builder) void {
         run_cmd_miner.addArgs(args);
     }
 
+    const indexer = b.addExecutable("indexer", "exe/indexer.zig");
+    indexer.setTarget(target);
+    indexer.setBuildMode(mode);
+    indexer.install();
+
+    indexer.addPackage(dht_pkg);
+    indexer.addPackage(args_pkg);
+    indexer.addPackage(pos_pkg);
+    indexer.addPackage(zigargs_pkg);
+
+    const run_cmd_indexer = indexer.run();
+    run_cmd_indexer.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        run_cmd_indexer.addArgs(args);
+    }
+
     const speedtest = b.addExecutable("speedtest", "exe/speedtest.zig");
     speedtest.setTarget(target);
     speedtest.setBuildMode(mode);
@@ -71,4 +87,10 @@ pub fn build(b: *std.build.Builder) void {
     speedtest.addPackage(dht_pkg);
     speedtest.addPackage(args_pkg);
     speedtest.addPackage(pos_pkg);
+
+    const run_cmd_speedtest = speedtest.run();
+    run_cmd_speedtest.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        run_cmd_speedtest.addArgs(args);
+    }
 }

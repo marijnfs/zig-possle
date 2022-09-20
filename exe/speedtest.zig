@@ -11,45 +11,64 @@ const Hash = dht.Hash;
 const Block = miner.Block;
 
 const allocator = std.heap.page_allocator;
+pub const log_level: std.log.Level = .info;
 
 fn test_ssd_retrieval() !void {
-    const plot_path = "main.db";
+    std.log.info("Loading", .{});
+
+    const plot_path = "main-128.db";
     const persistent_plot = try pos.plot.PersistentPlot.init(allocator, plot_path);
+    const t = std.time.milliTimestamp();
+    std.log.info("To Mem", .{});
 
     var i: usize = 0;
     while (true) {
         if (i % 100000 == 0) {
-            std.log.info("n found: {}", .{i});
+            std.log.info("n found: {} {}", .{ i, std.time.milliTimestamp() - t });
         }
 
-        const idx = dht.rng.random.intRangeLessThan(usize, persistent_plot.size);
-        _ = persistent_plot.get_plant(idx);
+        const idx = dht.rng.random().uintLessThanBiased(usize, persistent_plot.size);
+        _ = try persistent_plot.get_plant(idx);
+        i += 1;
     }
 }
 
 fn test_mem_retrieval() !void {
-    const plot_path = "main.db";
+    std.log.info("Loading", .{});
+
+    const plot_path = "main-32.db";
     const persistent_plot = try pos.plot.PersistentPlot.init(allocator, plot_path);
-    const plot = persistent_plot.to_memory();
+
+    std.log.info("To Mem", .{});
+    const plot = try persistent_plot.to_memory(allocator);
     var i: usize = 0;
+    const t = std.time.milliTimestamp();
+
+    std.log.info("Starting", .{});
     while (true) {
         if (i % 100000 == 0) {
-            std.log.info("n found: {}", .{i});
+            std.log.info("n found: {} {}", .{ i, std.time.milliTimestamp() - t });
         }
-        const idx = dht.rng.random.intRangeLessThan(usize, plot.size);
+        const idx = dht.rng.random().uintLessThanBiased(usize, plot.size);
         _ = plot.get_plant(idx);
+        i += 1;
     }
 }
 
 fn test_index_retrieval() !void {
-    const plot_path = "main.db";
+    // const plot_path = "main.db";
+    const plot_path = ".tmp/plot_332";
+    const index_path = "index";
+
     const persistent_plot = try pos.plot.PersistentPlot.init(allocator, plot_path);
-    const indexed_plot = try pos.plot.IndexedPersistentPlot.init(allocator, persistent_plot);
+    const indexed_plot = try pos.plot.IndexedPersistentPlot.init_with_index(allocator, persistent_plot, index_path);
+
+    const t = std.time.milliTimestamp();
 
     var i: usize = 0;
     while (true) {
         if (i % 100000 == 0) {
-            std.log.info("n found: {}", .{i});
+            std.log.info("n found: {} {}", .{ i, std.time.milliTimestamp() - t });
         }
 
         var prehash: ID = undefined;
@@ -66,22 +85,26 @@ fn test_block_creation() !void {
     var tx: ID = dht.id.zeroes();
 
     var i: usize = 0;
+
+    const t = std.time.milliTimestamp();
     while (true) {
         if (i % 100000 == 0) {
-            std.log.info("n created: {}", .{i});
+            std.log.info("n created: {} in {}ms", .{ i, std.time.milliTimestamp() - t });
         }
         var mining_block = Block{};
         var nonce: ID = undefined;
         dht.rng.random().bytes(&nonce);
         try mining_block.setup_mining_block(chain_head, tx, nonce);
         _ = mining_block.prehash; //created
+        i += 1;
     }
 }
 
 pub fn main() !void {
+    // std.log.info("Speed test", .{});
     // try test_ssd_retrieval();
     // try test_mem_retrieval();
-    // try test_index_retrieval();
-    try test_block_creation();
-    return error.UnImplemented;
+    try test_index_retrieval();
+    // try test_block_creation();
+    // return error.UnImplemented;
 }
