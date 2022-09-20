@@ -309,6 +309,10 @@ fn send_block_if_embargo(t: i64, server: *dht.Server) !void {
 
     if (our_best_block.total_embargo != 0 and t - miner_settings.send_delay > our_best_block.total_embargo) { //time to send block
 
+        // Just a condition for our 'build on previous block strategy experiment'
+        if (our_best_block.total_difficulty < chain_head.total_difficulty)
+            return;
+
         try debug_msg(try std.fmt.allocPrint(allocator, "sending own block: bid:{} emb:{} diff:{}", .{
             hex(our_best_block.hash[0..8]),
             our_best_block.total_embargo,
@@ -472,7 +476,7 @@ pub fn main() anyerror!void {
                 mining_block.seed = found.seed;
                 mining_block.bud = found.bud;
 
-                mining_block.calculate_embargo(chain_head);
+                mining_block.calculate_embargo(prev_block);
                 mining_block.calculate_hash();
                 best_block_mutex.lock();
                 defer best_block_mutex.unlock();

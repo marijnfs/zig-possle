@@ -28,7 +28,13 @@ fn test_ssd_retrieval() !void {
         }
 
         const idx = dht.rng.random().uintLessThanBiased(usize, persistent_plot.size);
-        _ = try persistent_plot.get_plant(idx);
+        try persistent_plot.file.seekTo(idx * @sizeOf(pos.Plant));
+
+        var buf: [@sizeOf(pos.Plant)]u8 = undefined;
+        const r = try persistent_plot.file.reader().readAll(&buf);
+        if (r < @sizeOf(pos.Plant))
+            return error.Fail;
+        // _ = try persistent_plot.get_plant(idx);
         i += 1;
     }
 }
@@ -57,8 +63,8 @@ fn test_mem_retrieval() !void {
 
 fn test_index_retrieval() !void {
     // const plot_path = "main.db";
-    const plot_path = ".tmp/plot_332";
-    const index_path = "index";
+    const plot_path = "main-128.db";
+    const index_path = "index-128";
 
     const persistent_plot = try pos.plot.PersistentPlot.init(allocator, plot_path);
     const indexed_plot = try pos.plot.IndexedPersistentPlot.init_with_index(allocator, persistent_plot, index_path);
@@ -76,6 +82,14 @@ fn test_index_retrieval() !void {
 
         // Get prehash
         _ = try indexed_plot.find_index(prehash);
+
+        // try persistent_plot.file.seekTo(idx * @sizeOf(pos.Plant));
+
+        // var buf: [@sizeOf(pos.Plant)]u8 = undefined;
+        // const r = try persistent_plot.file.reader().readAll(&buf);
+        // if (r < @sizeOf(pos.Plant))
+        //     return error.Fail;
+
         i += 1;
     }
 }
@@ -102,9 +116,9 @@ fn test_block_creation() !void {
 
 pub fn main() !void {
     // std.log.info("Speed test", .{});
-    // try test_ssd_retrieval();
+    try test_ssd_retrieval();
     // try test_mem_retrieval();
-    try test_index_retrieval();
+    // try test_index_retrieval();
     // try test_block_creation();
     // return error.UnImplemented;
 }
