@@ -29,7 +29,7 @@ fn distance_to_difficulty(dist: ID) f64 {
     return 256.0 - log_value;
 }
 
-const Block = struct {
+pub const Block = struct {
     hash: ID = dht.id.zeroes(),
 
     prev: ID = dht.id.zeroes(),

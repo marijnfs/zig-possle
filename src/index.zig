@@ -6,3 +6,6 @@ pub const math = @import("math.zig");
 
 pub const Plant = plot.Plant;
 pub const hex = std.fmt.fmtSliceHexLower;
+
+pub var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true, .stack_trace_frames = 12 }){};
+pub const allocator = gpa.allocator();

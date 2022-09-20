@@ -1,5 +1,8 @@
 const std = @import("std");
 const dht = @import("dht");
+const pos = @import("index.zig");
+
+const allocator = pos.allocator;
 const argon2 = std.crypto.pwhash.argon2;
 const hex = std.fmt.fmtSliceHexLower;
 const ID = dht.ID;
@@ -125,8 +128,8 @@ pub const Plot = struct {
         return plot.land.items[idx];
     }
     pub fn seed(plot: *Plot) !void {
-        // var buf = try std.heap.page_allocator.alloc(u8, 1 * 1024 * 1024);
-        // defer std.heap.page_allocator.free(buf);
+        // var buf = try allocator.alloc(u8, 1 * 1024 * 1024);
+        // defer allocator.free(buf);
 
         var rng = std.rand.DefaultPrng.init(dht.rng.random().int(u64));
 
@@ -537,6 +540,10 @@ pub const IndexedPersistentPlot = struct {
     pub fn setup_table(plot: *IndexedPersistentPlot, alloc: std.mem.Allocator) !void {
         std.log.info("Building table", .{});
 
+        var progress = std.Progress{};
+        const root_node = progress.start("Building Index", plot.persistent.size);
+        defer root_node.end();
+
         const IndexNode = struct {
             bit: usize,
             l: usize,
@@ -566,8 +573,9 @@ pub const IndexedPersistentPlot = struct {
 
             const idx = try plot.persistent.find_lr_bit(l, r, bit);
 
-            if (idx % 10000 == 0)
-                std.log.info("stack: {}", .{index_node});
+            root_node.completeOne();
+            // if (idx % 10000 == 0)
+            //     std.log.info("stack: {}", .{index_node});
 
             const new_node = Node{};
             try plot.trie.append(new_node);
@@ -639,17 +647,17 @@ pub const MergePlotter = struct {
         const run = struct {
             fn run(q: *dht.AtomicQueue(*Plot), block_size: usize, c: *std.atomic.Atomic(usize)) !void {
                 while (c.load(.SeqCst) == 0) {
-                    var new_plot = try Plot.init(std.heap.page_allocator, block_size);
+                    var new_plot = try Plot.init(allocator, block_size);
                     try new_plot.seed();
                     try q.push(new_plot);
                 }
             }
         }.run;
 
-        var queue = dht.AtomicQueue(*Plot).init(std.heap.page_allocator);
+        var queue = dht.AtomicQueue(*Plot).init(allocator);
         defer queue.deinit();
 
-        var runners = std.ArrayList(std.Thread).init(std.heap.page_allocator);
+        var runners = std.ArrayList(std.Thread).init(allocator);
         defer runners.deinit();
         var i: usize = 0;
         while (i < n_threads) : (i += 1) {
@@ -668,6 +676,12 @@ pub const MergePlotter = struct {
         for (runners.items) |*thread| {
             thread.join();
         }
+
+        // clear up the queue
+        while (queue.pop()) |plot| {
+            plot.deinit();
+        }
+
         return plotter.extract_plot();
     }
 

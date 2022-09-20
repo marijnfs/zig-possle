@@ -79,5 +79,9 @@ fn test_block_creation() !void {
 }
 
 pub fn main() !void {
+    // try test_ssd_retrieval();
+    // try test_mem_retrieval();
+    // try test_index_retrieval();
+    try test_block_creation();
     return error.UnImplemented;
 }

@@ -13,8 +13,10 @@ const flag = yazap.flag;
 
 pub const log_level: std.log.Level = .info;
 // const allocator = std.heap.page_allocator;
-var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true, .stack_trace_frames = 12 }){};
-const allocator = gpa.allocator();
+// var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true, .stack_trace_frames = 12 }){};
+// const allocator = gpa.allocator();
+
+const allocator = pos.allocator;
 
 fn read_size(str: []const u8) !usize {
     if (str.len == 0)
@@ -33,9 +35,9 @@ fn read_size(str: []const u8) !usize {
 
 pub fn main() anyerror!void {
     try dht.init();
-    defer _ = gpa.deinit();
+    defer _ = pos.gpa.deinit();
 
-    var string_arena = std.heap.ArenaAllocator.init(gpa.allocator());
+    var string_arena = std.heap.ArenaAllocator.init(allocator);
     defer string_arena.deinit();
     // Setup server
     var mine = Command.new(allocator, "mine");
