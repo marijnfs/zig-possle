@@ -47,20 +47,20 @@ pub fn build(b: *std.build.Builder) void {
         run_cmd_plotter.addArgs(args);
     }
 
-    const miner = b.addExecutable("miner", "exe/miner.zig");
-    miner.setTarget(target);
-    miner.setBuildMode(mode);
-    miner.install();
+    const farmer = b.addExecutable("farmer", "exe/farmer.zig");
+    farmer.setTarget(target);
+    farmer.setBuildMode(mode);
+    farmer.install();
 
-    miner.addPackage(dht_pkg);
-    miner.addPackage(args_pkg);
-    miner.addPackage(pos_pkg);
-    miner.addPackage(zigargs_pkg);
+    farmer.addPackage(dht_pkg);
+    farmer.addPackage(args_pkg);
+    farmer.addPackage(pos_pkg);
+    farmer.addPackage(zigargs_pkg);
 
-    const run_cmd_miner = miner.run();
-    run_cmd_miner.step.dependOn(b.getInstallStep());
+    const run_cmd_farmer = farmer.run();
+    run_cmd_farmer.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
-        run_cmd_miner.addArgs(args);
+        run_cmd_farmer.addArgs(args);
     }
 
     const indexer = b.addExecutable("indexer", "exe/indexer.zig");

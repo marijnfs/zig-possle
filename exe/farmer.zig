@@ -362,7 +362,7 @@ pub fn main() anyerror!void {
         ip: ?[]const u8,
         port: ?u16,
         plot_path: []const u8,
-        index_path: ?[]const u8,
+        index_path: ?[]const u8 = null,
         remote_ip: ?[]const u8 = null,
         remote_port: ?u16 = null,
         db_path: ?[]const u8 = null,
@@ -424,18 +424,16 @@ pub fn main() anyerror!void {
         const persistent_plot = try pos.plot.PersistentPlot.init(allocator, options.options.plot_path);
 
         std.log.info("Loading indexed", .{});
-        const indexed_plot = b: {
-            if (options.options.index_path) |index_path| {
-                std.log.info("Loading indexed {s}", .{index_path});
+        var indexed_plot: ?*pos.plot.IndexedPersistentPlot = null;
 
-                break :b try pos.plot.IndexedPersistentPlot.init_with_index(allocator, persistent_plot, index_path);
-            } else {
-                break :b try pos.plot.IndexedPersistentPlot.init(allocator, persistent_plot);
-            }
-        };
+        if (options.options.index_path) |index_path| {
+            std.log.info("Loading indexed {s}", .{index_path});
+
+            indexed_plot = try pos.plot.IndexedPersistentPlot.init_with_index(allocator, persistent_plot, index_path);
+        }
 
         std.log.info("{}", .{persistent_plot.size});
-        std.log.info("trie size:{}", .{indexed_plot.trie.items.len});
+        // std.log.info("trie size:{}", .{indexed_plot.trie.items.len});
 
         std.log.info("Start mining", .{});
         var i: usize = 0;
@@ -465,8 +463,14 @@ pub fn main() anyerror!void {
 
             // Get prehash
             const prehash = mining_block.prehash;
-            // const found = try persistent_plot.find(prehash);
-            const found = try indexed_plot.find(prehash);
+            const found = b: {
+                if (indexed_plot) |plot| {
+                    break :b try plot.find(prehash);
+                } else {
+                    break :b try persistent_plot.find(prehash);
+                }
+            };
+            // const found = try indexed_plot.find(prehash);
 
             const dist = dht.id.xor(prehash, found.bud);
 
